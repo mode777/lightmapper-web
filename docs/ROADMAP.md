@@ -37,7 +37,7 @@ Each milestone ends with something a human can see or a test can prove.*
 
 Everything here is unit-testable without a GPU.
 
-- [ ] `BakeScene` / input types per DESIGN §1 (meshes, lights, probes, env)
+- [x] `BakeScene` / input types per DESIGN §1 (meshes, lights, probes, env)
 - [ ] `@lightmapper/unwrap`: watlas integration, Godot presets (ADR-0002),
       worker-hosted, `uv2` normalization to atlas-space inputs
 - [ ] Atlas packer: port `_blit_meshes_into_atlas` bruteforce sizing +
@@ -49,8 +49,8 @@ Everything here is unit-testable without a GPU.
       + AABBs, grid texture data (`rg32uint`, `count | cluster_index` pairs)
 - [ ] Buffer packing: `pack*()` helpers into the M0 struct writers;
       `cluster_data` merged buffer layout (ADR-0005)
-- [ ] Light list assembly + type-sort (Godot sorts by type — preserve!)
-- [ ] Probe generation (`subdiv_4/8/16/32` bounds grid → probe positions)
+- [x] Light list assembly + type-sort (Godot sorts by type — preserve!)
+- [x] Probe generation (`subdiv_4/8/16/32` bounds grid → probe positions)
 - [ ] Unit tests: known-scene accel dumps (hand-computed small cases),
       seam detection on a seam-bearing quad pair
 - **Exit criteria:** for a fixture scene, all upload buffers are byte-identical

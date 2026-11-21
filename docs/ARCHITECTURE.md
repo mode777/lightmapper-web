@@ -1,6 +1,6 @@
 # Architecture
 
-*Last updated: 2026-11-21 (M0). Keep this document current with reality.*
+*Last updated: 2026-11-21 (M1 in progress). Keep this document current with reality.*
 
 ## 1. Mission & non-goals
 
