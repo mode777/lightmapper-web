@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+*.tsbuildinfo
+
+# rust
+target/
+Cargo.lock
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+
+# local golden data (large dumps are stored out-of-band; see docs/PORTING_PLAYBOOK.md)
+golden/**/*.exr
+golden/**/*.bin

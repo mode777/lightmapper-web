@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>lightmapper-web — Cornell demo</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>lightmapper-web</h1>
+        <p class="tagline">
+          Godot&nbsp;4&rsquo;s GPU lightmapper, ported to WebGPU. This page will host the
+          Cornell-box bake demo (roadmap milestone M6).
+        </p>
+      </header>
+
+      <section id="webgpu-status" class="card">
+        <h2>WebGPU capability probe</h2>
+        <div id="probe">Probing…</div>
+        <canvas id="clear-canvas" width="320" height="180"></canvas>
+        <p class="hint">
+          The swatch above is cleared by a real WebGPU render pass — if it is teal, your
+          browser is running WebGPU right now.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Roadmap status</h2>
+        <ul id="roadmap-status">
+          <li data-state="done"><b>M0 — Foundations</b> repo, CI (typecheck + unit + naga WGSL validation), demo shell, bit-exact hash &amp; struct-layout ports</li>
+          <li data-state="todo"><b>M1 — Data plane</b> scene API, atlas packer, acceleration structure</li>
+          <li data-state="todo"><b>M2 — G-buffer</b> split raster passes, un-occlusion</li>
+          <li data-state="todo"><b>M3 — Direct light</b> primary kernel, soft shadows, transparency</li>
+          <li data-state="todo"><b>M4 — Indirect + probes</b> bounce kernel, environment, light probes</li>
+          <li data-state="todo"><b>M5 — Finishing</b> JNLM denoise, seam blending, dilate</li>
+          <li data-state="todo"><b>M6 — Demo</b> full Cornell-box bake in this page</li>
+        </ul>
+        <p class="hint">Details: <a href="https://github.com/mode777/lightmapper-web/blob/main/docs/ROADMAP.md">docs/ROADMAP.md</a></p>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

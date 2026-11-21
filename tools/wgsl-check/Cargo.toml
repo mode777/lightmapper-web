@@ -1,0 +1,11 @@
+[package]
+name = "wgsl-check"
+version = "0.1.0"
+edition = "2021"
+description = "Validate every .wgsl shader in the repo with naga (no GPU required)"
+license = "MIT"
+publish = false
+
+[dependencies]
+# Keep in sync with the wgpu/naga family used by target browsers where possible.
+naga = { version = "30", features = ["wgsl-in"] }
