@@ -40,7 +40,7 @@ Everything here is unit-testable without a GPU.
 - [x] `BakeScene` / input types per DESIGN §1 (meshes, lights, probes, env)
 - [ ] `@lightmapper/unwrap`: watlas integration, Godot presets (ADR-0002),
       worker-hosted, `uv2` normalization to atlas-space inputs
-- [ ] Atlas packer: port `_blit_meshes_into_atlas` bruteforce sizing +
+- [x] Atlas packer: port `_blit_meshes_into_atlas` bruteforce sizing +
       `partial_pack_rects`; padding rule `max(2, denoiserRange) × supersampling`
       — unit tests incl. Godot's "center in oversized region" `+1` offset quirk
 - [ ] Accel structure (worker): vertex dedup via `vertexHash` (M0 ✅), seam
