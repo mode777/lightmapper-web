@@ -43,15 +43,17 @@ Everything here is unit-testable without a GPU.
 - [x] Atlas packer: port `_blit_meshes_into_atlas` bruteforce sizing +
       `partial_pack_rects`; padding rule `max(2, denoiserRange) × supersampling`
       — unit tests incl. Godot's "center in oversized region" `+1` offset quirk
-- [ ] Accel structure (worker): vertex dedup via `vertexHash` (M0 ✅), seam
+- [x] Accel structure (worker): vertex dedup via `vertexHash` (M0 ✅), seam
       detection via `edgeHash` + `EdgeUV2` equality rules, grid plotting
       (recursive 8-subdivision + `triangle_box_overlap`), cluster median-split
       + AABBs, grid texture data (`rg32uint`, `count | cluster_index` pairs)
-- [ ] Buffer packing: `pack*()` helpers into the M0 struct writers;
+      — byte-verified against a C++ extraction of the upstream code on 400
+      random scenes (worker host lands with the driver wiring, M2)
+- [x] Buffer packing: `pack*()` helpers into the M0 struct writers;
       `cluster_data` merged buffer layout (ADR-0005)
 - [x] Light list assembly + type-sort (Godot sorts by type — preserve!)
 - [x] Probe generation (`subdiv_4/8/16/32` bounds grid → probe positions)
-- [ ] Unit tests: known-scene accel dumps (hand-computed small cases),
+- [x] Unit tests: known-scene accel dumps (hand-computed small cases),
       seam detection on a seam-bearing quad pair
 - **Exit criteria:** for a fixture scene, all upload buffers are byte-identical
   to a native Godot instrumentation dump (golden) *or* hand-verified vectors;

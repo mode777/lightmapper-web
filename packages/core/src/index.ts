@@ -9,3 +9,5 @@ export * from './scene/probes.js';
 export * from './scene/bake-scene.js';
 export * from './atlas/stb-rect-pack.js';
 export * from './atlas/pack.js';
+export * from './accel/sort-array.js';
+export * from './accel/accel.js';
