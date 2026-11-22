@@ -5,9 +5,10 @@ package that bakes lightmap atlases and light probes for arbitrary scenes —
 no engine, no server, no native build step. Feed it meshes, lights and an
 environment; get HDR lightmaps back.
 
-> Status: **M1 in progress** — foundations + scene model (meshes/lights/probes
-> inputs, light assembly, octree probe generation, SAT + AABB math ports).
-> See the [roadmap](docs/ROADMAP.md) for the path to a working browser demo.
+> Status: **M1 done** — the CPU data plane (scene model, unwrap via xatlas,
+> atlas packer, acceleration structure) is complete and byte-verified against
+> C++ extractions of the upstream code. Next: the M2 GPU driver. See the
+> [roadmap](docs/ROADMAP.md) for the path to a working browser demo.
 >
 > 🎬 **Live demo (capability probe for now):** https://mode777.github.io/lightmapper-web/
 

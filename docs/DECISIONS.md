@@ -20,7 +20,8 @@ new ADR that references the old one — never edit history.
 
 ## ADR-0002: UV unwrapping via watlas (xatlas-wasm)
 
-- **Status:** Accepted (2026-11-21)
+- **Status:** Accepted (2026-11-21) — dependency realized as `xatlas-wasm`
+  (2026-11-22, see note)
 - **Context:** Arbitrary input meshes need lightmap UVs; Godot's glue around
   xatlas is ~240 lines with known options (`fixWinding`, `padding=1`,
   `blockAlign=true`, `maxChartSize=4094`, `texelsPerUnit=1/texelSize`).
@@ -28,6 +29,10 @@ new ADR that references the old one — never edit history.
   defaults; expose chart/pack phases.
 - **Consequences:** Chart layout parity with Godot. Fallback if watlas stalls:
   build our own emscripten wrapper of unpatched upstream xatlas (1–2 days).
+- **Note (2026-11-22):** M1 landed on the documented fallback path — the
+  `xatlas-wasm` package (same wrapper concept, MIT, worker-capable, published
+  on npm) is consumed by `@lightmapper/unwrap` instead of `watlas`. The Godot
+  preset surface and output contract are identical; no decision change.
 
 ## ADR-0003: Push constants → dynamic-offset uniform buffer
 

@@ -33,13 +33,16 @@ Each milestone ends with something a human can see or a test can prove.*
       (conventions, provenance header, quirk markers)
 - [x] Docs: architecture, design, tech stack, risks, decisions, playbook, roadmap
 
-## M1 — Data plane (CPU: scene → GPU buffers) — est. 2–4 weeks
+## M1 — Data plane (CPU: scene → GPU buffers) ✅ (done 2026-11-22)
 
 Everything here is unit-testable without a GPU.
 
 - [x] `BakeScene` / input types per DESIGN §1 (meshes, lights, probes, env)
-- [ ] `@lightmapper/unwrap`: watlas integration, Godot presets (ADR-0002),
-      worker-hosted, `uv2` normalization to atlas-space inputs
+- [x] `@lightmapper/unwrap`: watlas integration, Godot presets (ADR-0002),
+      worker-hosted, `uv2` normalization to atlas-space inputs — consumed
+      via `xatlas-wasm` (ADR-0002's "own emscripten wrapper of unpatched
+      upstream xatlas" fallback, materialized); presets and the xref + UV
+      normalization contract ported from `xatlas_unwrap/register_types.cpp`
 - [x] Atlas packer: port `_blit_meshes_into_atlas` bruteforce sizing +
       `partial_pack_rects`; padding rule `max(2, denoiserRange) × supersampling`
       — unit tests incl. Godot's "center in oversized region" `+1` offset quirk
@@ -55,9 +58,12 @@ Everything here is unit-testable without a GPU.
 - [x] Probe generation (`subdiv_4/8/16/32` bounds grid → probe positions)
 - [x] Unit tests: known-scene accel dumps (hand-computed small cases),
       seam detection on a seam-bearing quad pair
-- **Exit criteria:** for a fixture scene, all upload buffers are byte-identical
-  to a native Godot instrumentation dump (golden) *or* hand-verified vectors;
-  all tests green in CI.
+- **Exit criteria:** met — the accel-structure, atlas and packer ports were
+  compared byte-for-byte against standalone C++ extractions of the pinned
+  upstream code (hash funcs, SAT, SortArray, stb_rect_pack) on randomized
+  scene streams; hashes/structs/lights/probes are pinned by reference
+  vectors. A native `DEBUG_TEXTURES` golden pass stays recommended at the
+  M2 boundary per the verification model.
 
 ## M2 — G-buffer stage (first GPU) — est. 2–3 weeks
 

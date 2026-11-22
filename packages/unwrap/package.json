@@ -1,0 +1,18 @@
+{
+  "name": "@lightmapper/unwrap",
+  "version": "0.0.1",
+  "description": "Lightmap UV unwrapping for the WebGPU port of Godot's lightmapper — xatlas with Godot's presets",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "xatlas-wasm": "^0.2.0"
+  }
+}
