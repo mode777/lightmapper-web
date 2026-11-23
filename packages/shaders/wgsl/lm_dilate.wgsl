@@ -10,7 +10,7 @@
 // nearest lit texel (alpha > 0.5) within `4 * supersampling_factor` texels.
 //
 // Binding map (see docs/DESIGN.md §5 for the canonical map):
-//   group 0 — shared "base" set (lm_common):
+//   group 0 — shared "base" set (lm_common_inc.wgsl):
 //     binding 0: BakeParameters uniform buffer
 //   group 1 — kernel I/O:
 //     binding 0: dest_light   — texture_storage_2d_array<rgba16float, write>
@@ -18,23 +18,7 @@
 //   group 2 — per-dispatch Params (push-constant replacement, ADR-0003):
 //     binding 0: Params uniform buffer (dynamic offset)
 
-struct BakeParameters {
-  world_size: vec3<f32>,
-  bias: f32,
-  to_cell_offset: vec3<f32>,
-  grid_size: i32,
-  to_cell_size: vec3<f32>,
-  light_count: u32,
-  // Column-major mat3x4, exactly as Godot uploads it (48 bytes).
-  env_transform: mat3x4<f32>,
-  atlas_size: vec2<i32>,
-  exposure_normalization: f32,
-  bounces: u32,
-  bounce_indirect_energy: f32,
-  shadowmask_light_idx: i32,
-  transparency_rays: u32,
-  supersampling_factor: f32,
-}
+#include "lm_common_inc.wgsl"
 
 // Mirrors the GLSL push-constant `Params` (32 bytes).
 struct Params {
@@ -47,7 +31,6 @@ struct Params {
   denoiser_range: u32,
 }
 
-@group(0) @binding(0) var<uniform> bake_params: BakeParameters;
 @group(1) @binding(0) var dest_light: texture_storage_2d_array<rgba16float, write>;
 @group(1) @binding(1) var source_light: texture_2d_array<f32>;
 @group(2) @binding(0) var<uniform> params: Params;
