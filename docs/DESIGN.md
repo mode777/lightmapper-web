@@ -1,6 +1,6 @@
 # Design
 
-*Last updated: 2026-11-21 (M0). This document is the **authoritative**
+*Last updated: 2026-11-22 (M2). This document is the **authoritative**
 specification for the public API, data contracts and WGSL binding map.
 Implementation files (TS + WGSL) must stay in lock-step with it.*
 
@@ -24,6 +24,7 @@ scene.addMesh({
   indices?: Uint32Array,              // triangle list; sequential if omitted
   uv2?: Float32Array,                 // xy *; if omitted, unwrapped via xatlas (M1)
   texelSize?: number,                 // world units per lightmap texel (unwrap hint)
+  lightmapSizeHint?: [number, number],// texels; drives gbuffer image size (default 64×64)
   // Either user-supplied UV2-space images …
   albedoOnUv2?:  { width: number; height: number; data: Uint8Array },   // rgba8, alpha = opacity
   emissionOnUv2?:{ width: number; height: number; data: Uint16Array },  // rgbah
@@ -101,15 +102,28 @@ Fixed performance knobs (Godot defaults): `maxRaysPerPass = 4`,
   `lm_unocclude.wgsl`, `lm_light_probes.wgsl`, `lm_dilate.wgsl` (✅ reference
   example), `lm_denoise.wgsl`, `lm_pack_l1.wgsl`, `lm_raster.wgsl`,
   `lm_blendseams_lines.wgsl`, `lm_blendseams_triangles.wgsl`.
+- Shared declarations are **include snippets**: `lm_common_inc.wgsl` (the
+  port of `lm_common_inc.glsl` — base set + structs) and `lm_trace_inc.wgsl`
+  (the `trace_ray` traversal core). Kernels reference them with
+  `#include "name.wgsl"`, resolved before compilation by
+  `@lightmapper/shaders` (`resolveIncludes`) and `tools/wgsl-check` —
+  same-directory includes, **include-once** (Godot preprocessor semantics).
+  PORT: WGSL has no preprocessor; keep the TS and Rust resolvers in
+  lock-step.
 - Variants that Godot expresses as `#define` (`USE_SH_LIGHTMAPS`,
   `USE_SHADOWMASK`, `USE_LIGHT_TEXTURE_FOR_BOUNCES`, split-pass defines) are
   resolved by the build/driver via string-substitution on a `// DEFS:` marker
   block — same trick Godot's `#[versions]` uses. The substitution must happen
   before `createShaderModule`; `tools/wgsl-check` validates the un-substituted
   file (keep the marker block valid WGSL — use `if (false && OVERRIDES)`-free
-  patterns; see playbook §4.3).
-- Reserved words: WGSL reserves `type`, `size`, `range`, `filter`, … — suffix
-  with `_` (`type_`, `size_`, `range_`) and keep the GLSL name in comments.
+  patterns; see playbook §4.3). *Realized alternatives so far:* the raster
+  split passes (ADR-0004) are **two fragment entry points** in one module —
+  WGSL cannot make output structs conditional on constant overrides — and
+  the merged cluster buffer's AABB offset (ADR-0005) is a pipeline
+  **override constant** (`cluster_aabb_offset_u32`).
+- Reserved words: WGSL reserves `type`, `size`, `range`, `filter`, `from`,
+  `pad`, … — suffix with `_` (`type_`, `size_`, `range_`) and keep the GLSL
+  name in comments.
 - Provenance header + `// GODOT-QUIRK:` / `// PORT:` markers are mandatory.
 
 ## 4. GPU data contracts (byte-exact with Godot — ADR-0008)
@@ -183,6 +197,23 @@ All little-endian. TS writers: `packages/core/src/layout/structs.ts`
 
 spatial/light/albedo/normal bandwidths (f32), half_search_window i32,
 filter_strength f32, slice_count u32, pad u32.
+
+### 4.8 `RasterPushConstant` — 64 bytes (uniform, group 2 binding 0, dynamic offset)
+
+The push constant of `lm_raster.glsl` (std430). Note `atlas_size` is
+**float2** here, unlike `BakeParameters.atlas_size` (int2). Writers:
+`writeRasterPushConstant`; pinned by `test/structs.test.ts`.
+
+| Offset | Field | Type |
+|---|---|---|
+| 0 | atlas_size | vec2⟨f32⟩ |
+| 8 | uv_offset | vec2⟨f32⟩ (−0.5/atlas half-pixel quirk) |
+| 16 | to_cell_size | vec3⟨f32⟩ |
+| 28 | base_triangle | u32 |
+| 32 | to_cell_offset | vec3⟨f32⟩ |
+| 44 | bias | f32 |
+| 48 | grid_size | vec3⟨i32⟩ |
+| 60 | pad2 | u32 |
 
 ## 5. Canonical WGSL binding map
 

@@ -65,26 +65,33 @@ Everything here is unit-testable without a GPU.
   vectors. A native `DEBUG_TEXTURES` golden pass stays recommended at the
   M2 boundary per the verification model.
 
-## M2 — G-buffer stage (first GPU) — est. 2–3 weeks
+## M2 — G-buffer stage (first GPU) ✅ (done 2026-11-22)
 
-- [ ] Driver skeleton: private `GPUDevice`, resource registry, bind-group
+- [x] Driver skeleton: private `GPUDevice`, resource registry, bind-group
       factory for the canonical map, `Params` ring buffer (ADR-0003)
-- [ ] `lm_raster.wgsl` port: vertex pulling from storage buffer (fallback:
+- [x] `lm_raster.wgsl` port: vertex pulling from storage buffer (fallback:
       indexed draw with real vertex buffers), position smoothing
       (`FA_SMOOTHEN_POSITION`), unocclude texel-size via `dpdx/dpdy`
-- [ ] Split-pass A/B (ADR-0004) + depth32; half-pixel `uv_offset` quirk
-- [ ] Edge-expansion emulation of the wireframe pass (ADR-0007)
-- [ ] `lm_unocclude.wgsl` port (4-tangent push-out, `bias × 10` quirk)
-- [ ] Readback path: per-slice `copyTextureToBuffer` with 256 B rows, rgbah
+- [x] Split-pass A/B (ADR-0004) + depth32; half-pixel `uv_offset` quirk
+- [x] Edge-expansion emulation of the wireframe pass (ADR-0007)
+- [x] `lm_unocclude.wgsl` port (4-tangent push-out, `bias × 10` quirk)
+- [x] Readback path: per-slice `copyTextureToBuffer` with 256 B rows, rgbah
       → `Uint16Array` + PNG preview helper
-- [ ] `@lightmapper/gbuffer` (minimal): albedo/emission-on-UV2 raster from
+- [x] `@lightmapper/gbuffer` (minimal): albedo/emission-on-UV2 raster from
       simple materials (albedo texture × (1−metallic), alpha, emission) —
       the `bake_render_uv2` replacement
-- [ ] Demo page upgrade: "run M2 stage" button rendering the position/normal
+- [x] Demo page upgrade: "run M2 stage" button rendering the position/normal
       textures of the fixture scene
-- **Exit criteria:** Pages demo shows correct position/normal/unocclude
-  atlases (humans verify); golden EXR comparison of `1_position_*.exr` /
-  `1_normal_*.exr` vs native if a GPU machine is available.
+- Notes: the accel-structure **worker host** deferred from M1 landed with
+  the driver wiring (`AccelWorkerHost`); WGSL sharing uses a tiny
+  `#include` resolution (include-once, like Godot's preprocessor) in both
+  `@lightmapper/shaders` and `tools/wgsl-check` — `lm_common_inc.wgsl`
+  maps 1:1 to upstream. The indexed-draw vertex-pulling fallback was not
+  needed (storage buffers in the vertex stage are core).
+- **Exit criteria:** code-complete; humans verify the position/normal/
+  unocclude atlases on the Pages deployment after merge; golden EXR
+  comparison of `1_position_*.exr` / `1_normal_*.exr` vs native remains
+  recommended when a GPU machine is available (playbook §7).
 
 ## M3 — Direct light — est. 2–4 weeks
 

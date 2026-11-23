@@ -31,11 +31,11 @@ Pinned commit: `67421f36e5069e62573c44beb8dd2f8f91e065b0` (master 2026-11-20;
 
 | Target file | Godot source | Kernel | Workgroup | Difficulty | Gotchas |
 |---|---|---|---|---|---|
-| `lm_raster.wgsl` (+split variant) | `lm_raster.glsl` | gbuffer raster (vertex+fragment) | raster | M | split passes (ADR-0004); `dpdx/dpdy` for texel size; half-pixel uv_offset; `FA_SMOOTHEN_POSITION`; wireframe→edge expansion (ADR-0007); flat varyings; vertex pulling |
+| `lm_raster.wgsl` (+split variant) | `lm_raster.glsl` | gbuffer raster (vertex+fragment) | raster | M | **DONE (M2)** — split passes are two fragment entry points (ADR-0004 note); `dpdx/dpdy` for texel size; half-pixel uv_offset; `FA_SMOOTHEN_POSITION`; wireframe→edge expansion (ADR-0007); flat varyings; vertex pulling |
 | `lm_blendseams_lines.wgsl` | `lm_blendseams.glsl#lines` | raster | raster | M | line-list; seams indexing (`seam_subidx` 0..3 pairing); push constants per draw |
 | `lm_blendseams_triangles.wgsl` | `lm_blendseams.glsl#triangles` | raster | raster | E | z-mask draw; blend=0 |
-| `lm_unocclude.wgsl` | `lm_compute.glsl#unocclude` | compute | 8×8 | M | read_write images on rgba32f arrays; `bias×10` quirk; store mask into unocclude.a→r |
-| `lm_primary.wgsl` | `lm_compute.glsl#primary` | compute | 8×8 | H | `trace_ray` traversal (bit-trick cluster/triangle masks, `firstTrailingBit`); hit-outside-cell rejection; front-face bias quirk; cull modes; `trace_direct_light` soft-shadow Vogel disk + penumbra early-inference; transparency chain; SH L1 accumulation variant; shadowmask variant |
+| `lm_unocclude.wgsl` | `lm_compute.glsl#unocclude` | compute | 8×8 | M | **DONE (M2)** — read_write rgba32f storage images; `bias×10` quirk; store mask into unocclude.a→r |
+| `lm_primary.wgsl` | `lm_compute.glsl#primary` | compute | 8×8 | H | `trace_ray` traversal (**already ported in `lm_trace_inc.wgsl`, M2** — bit-trick cluster/triangle masks, `firstTrailingBit`); hit-outside-cell rejection; front-face bias quirk; cull modes; `trace_direct_light` soft-shadow Vogel disk + penumbra early-inference; transparency chain; SH L1 accumulation variant; shadowmask variant |
 | `lm_secondary.wgsl` | `lm_compute.glsl#secondary` | compute | 8×8 | H | `trace_indirect_light` full path loop; `depth -= 1` transparency juggling; Russian roulette; emission × albedo_alpha.a; `USE_LIGHT_TEXTURE_FOR_BOUNCES` define; env equirect mapping |
 | `lm_light_probes.wgsl` | `lm_compute.glsl#light_probes` | compute | 64×1×1 | M | one invocation per probe; SH L2 table; accumulate across dispatches when `ray_from > 0`; final-chunk `×4/ray_count` |
 | `lm_pack_l1.wgsl` | `lm_compute.glsl#pack_coeffs` | compute | 8×8 | E | divide-by-8L0 quirk; clamp + 0.5 |
@@ -57,7 +57,7 @@ post-M6.)
 | `accel/grid.ts` | `_plot_triangle_into_triangle_index_list` | M | recursive 8-way; `triangle_box_overlap` port (core/math/geometry_3d.h — read it!); `cell_index = x + y·g + z·g²` |
 | `accel/clusters.ts` | `_sort_triangle_clusters` | M | median split on longest axis; `next_pow2(count/2)` lower-bounded by cluster size; cluster indices layout for merged buffer (ADR-0005) |
 | `accel/bounds.ts` | AABB merge/grow | E | grow by 0.1; include probe positions |
-| `driver/*.ts` | `bake()` stage graph | H | region/ray-chunk loops; texture ping-pongs (`SWAP`s); submit+await per region; readbacks; probe buffer retrieval |
+| `driver/*.ts` | `bake()` stage graph | H | M2 subset ✅ (`bakeGBuffer`: device/registry/params-ring/bind-groups + `stages/gbuffer.ts`, `readback.ts`); still to port with M3+: region/ray-chunk loops; texture ping-pongs (`SWAP`s); submit+await per region; probe buffer retrieval |
 | `driver/readback.ts` | `texture_get_data` usage | M | 256 B row alignment; rgbah/rgba8 decode; per-slice staging buffers |
 | `lights.ts` | `add_*_light` field packing | E | `size = tan(angular_distance)`; `inv_spot_attenuation = 1/attenuation`; area fields unused until post-M6 |
 | `unwrap/index.ts` | `xatlas_unwrap/register_types.cpp` | E | watlas options: `fixWinding`, `padding 1`, `maxChartSize 4094`, `blockAlign`, `texelsPerUnit 1/texelSize`; normalize UVs by atlas dims; degenerate-triangle epsilon filter |
@@ -145,6 +145,11 @@ Driver scans `// DEF:<NAME>` markers and prepends `NAME=true|false` override
 declarations. Keep the base file valid WGSL with `const USE_SH_LIGHTMAPS =
 false;`-style defaults so naga validates the unsubstituted file. (Final
 mechanism may evolve — if you change it, update this section + DESIGN §3.)
+
+Shared *declarations* (not defines) take a different route: `#include
+"name.wgsl"` snippets (`lm_common_inc.wgsl`, `lm_trace_inc.wgsl`) resolved
+include-once by `@lightmapper/shaders` and `tools/wgsl-check` before
+compilation — see DESIGN §3 and the shaders README.
 
 ### 4.4 Driver wiring
 

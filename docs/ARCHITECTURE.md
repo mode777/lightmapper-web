@@ -1,6 +1,6 @@
 # Architecture
 
-*Last updated: 2026-11-22 (M1 done). Keep this document current with reality.*
+*Last updated: 2026-11-22 (M2 done). Keep this document current with reality.*
 
 ## 1. Mission & non-goals
 
@@ -63,9 +63,9 @@ Godot 4.5's RD lightmapper for the features that matter on the web.
 | Package | Responsibility | Milestone |
 |---|---|---|
 | `@lightmapper/core` | Scene model, atlas packing, acceleration structure, struct packing, bake driver, GPU resource management | M1–M5 |
-| `@lightmapper/shaders` | WGSL kernels + shared struct declarations; consumed as source strings | M2–M5 |
+| `@lightmapper/shaders` | WGSL kernels + shared struct declarations; consumed as source strings | M2 ✅ (dilate, raster, unocclude, common/trace includes) → M5 |
 | `@lightmapper/unwrap` | watlas wrapper with Godot's chart/pack presets | M1 |
-| `@lightmapper/gbuffer` | Rasterizes albedo/emission-on-UV2 from glTF-ish materials (replaces Godot's `bake_render_uv2`) | M2 |
+| `@lightmapper/gbuffer` | Rasterizes albedo/emission-on-UV2 from glTF-ish materials (replaces Godot's `bake_render_uv2`) | M2 ✅ (minimal CPU rasterizer) |
 | `@lightmapper/io` | glTF input, rgbah/PNG/EXR output, Float16 helpers | M6 (input earlier if needed) |
 | `@lightmapper/adapters` | three.js integration helpers | M6 |
 | `tools/wgsl-check` | naga validation of all `.wgsl` (CI gate) | M0 ✅ |
@@ -78,10 +78,10 @@ Stage-by-stage mapping from Godot's `lightmapper_rd.cpp` to this repo:
 | # | Godot stage | Port lives in | GPU work | Notes / deltas |
 |---|---|---|---|---|
 | 0 | atlas layout bruteforce | `core/src/atlas/pack.ts` | — | port `Geometry2D::partial_pack_rects` semantics; padding = `max(2, denoiserRange) × supersampling` |
-| 1 | blit albedo/emission | `core/src/atlas/blit.ts` | copy | typed-array blits, rgbah emission |
-| 2 | acceleration structure | `core/src/accel/*` (worker) | — | byte-exact buffers; cluster indices+AABBs merged into **one** buffer (ADR-0005) |
-| 3 | G-buffer raster (UV2 space) | `core/src/driver/stages/gbuffer.ts` + `lm_raster.wgsl` | render | **split into two passes** (48 B/sample > WebGPU 32 B cap, ADR-0004); wireframe pass replaced by edge-expansion (ADR-0007) |
-| 4 | un-occlude | `lm_unocclude.wgsl` | compute 8×8 | read_write storage textures; ping-pong fallback documented |
+| 1 | blit albedo/emission | `core/src/atlas/blit.ts` | copy | typed-array blits, rgbah emission ✅ (M2); images rendered by `@lightmapper/gbuffer` |
+| 2 | acceleration structure | `core/src/accel/*` (worker) | — | byte-exact buffers; cluster indices+AABBs merged into **one** buffer (ADR-0005); worker host ✅ (M2) |
+| 3 | G-buffer raster (UV2 space) | `core/src/driver/stages/gbuffer.ts` + `lm_raster.wgsl` | render | ✅ M2 — **split into two passes** (48 B/sample > WebGPU 32 B cap, ADR-0004); wireframe pass replaced by edge-expansion (ADR-0007) |
+| 4 | un-occlude | `lm_unocclude.wgsl` | compute 8×8 | ✅ M2 — read_write storage textures; ping-pong fallback documented |
 | 5 | direct light | `lm_primary.wgsl` | compute 8×8 | Halton AA, Vogel soft shadows, transparency via albedo alpha, optional SH/`shadowmask` variants via `PORT:` defines |
 | 6 | indirect light | `lm_secondary.wgsl` | compute 8×8 | ray-chunked accumulation; env panorama sampled as **rgba16f** (ADR-0006) |
 | 7 | light probes | `lm_light_probes.wgsl` | compute 64×1 | SH L2 accumulation across dispatches |

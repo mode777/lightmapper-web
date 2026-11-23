@@ -55,6 +55,13 @@ new ADR that references the old one — never edit history.
   (8 B). Two pipeline variants via a define; same vertex shader.
 - **Consequences:** One extra pass per slice; negligible. Enables future
   request-limit raise to collapse the passes back.
+- **Note (2026-11-22, M2 realization):** WGSL cannot make *output structs*
+  conditional on constant overrides, so the "two pipeline variants via a
+  define" materialized as **two fragment entry points** (`fa_main` /
+  `fb_main`) in one `lm_raster.wgsl` module sharing the same vertex stage —
+  the WGSL-native equivalent. Each pass clears depth to 1.0 exactly like the
+  single upstream pass; identical geometry yields identical depth outcomes
+  across the split.
 
 ## ADR-0005: Merge cluster buffers to stay ≤ 8 storage buffers per stage
 
