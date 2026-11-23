@@ -8,6 +8,7 @@ import {
   writeDenoiseParams,
   writeLight,
   writeParams,
+  writeRasterPushConstant,
   writeTriangle,
   writeVertex,
   type GpuBakeParameters,
@@ -15,6 +16,7 @@ import {
   type GpuDenoiseParams,
   type GpuLight,
   type GpuParams,
+  type GpuRasterPushConstant,
   type GpuTriangle,
   type GpuVertex,
 } from '../src/layout/structs.js';
@@ -202,5 +204,35 @@ describe('GPU struct layouts (byte-exact with Godot)', () => {
     expect(view.getFloat32(0, true)).toBe(5);
     expect(view.getInt32(16, true)).toBe(8);
     expect(view.getUint32(24, true)).toBe(1);
+  });
+
+  it('RasterPushConstant (lm_raster.glsl Params) is 64 bytes, std430', () => {
+    expect(STRUCT_SIZES.rasterPushConstant).toBe(64);
+    const buf = new ArrayBuffer(STRUCT_SIZES.rasterPushConstant);
+    const view = new DataView(buf);
+    const p: GpuRasterPushConstant = {
+      atlasSize: [1024, 1024],
+      uvOffset: [-0.00048828125, -0.00048828125], // -0.5/1024
+      toCellSize: [12.8, 42.66666793823242, 25.6],
+      baseTriangle: 48,
+      toCellOffset: [-2.1, 0, -2.5],
+      bias: 0.01,
+      gridSize: [128, 128, 128],
+      pad2: 0,
+    };
+    writeRasterPushConstant(view, 0, p);
+    // Offsets per docs/DESIGN.md §4.8 (std430: vec2@0, vec2@8, vec3@16,
+    // u32@28, vec3@32, f32@44, ivec3@48, u32@60).
+    expect(view.getFloat32(0, true)).toBe(1024);
+    expect(view.getFloat32(4, true)).toBe(1024);
+    expect(view.getFloat32(8, true)).toBeCloseTo(-0.5 / 1024, 10);
+    expect(view.getFloat32(16, true)).toBeCloseTo(12.8, 6);
+    expect(view.getFloat32(24, true)).toBeCloseTo(25.6, 6);
+    expect(view.getUint32(28, true)).toBe(48);
+    expect(view.getFloat32(32, true)).toBeCloseTo(-2.1, 6);
+    expect(view.getFloat32(44, true)).toBeCloseTo(0.01, 8);
+    expect(view.getInt32(48, true)).toBe(128);
+    expect(view.getInt32(56, true)).toBe(128);
+    expect(view.getUint32(60, true)).toBe(0);
   });
 });

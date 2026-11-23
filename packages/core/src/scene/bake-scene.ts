@@ -38,10 +38,11 @@ export interface ResolvedMesh {
   positions: Float32Array;
   /** xyz per corner; user-supplied or flat-computed. */
   normals: Float32Array;
-  /** xy per corner in 0–1 chart space, or undefined when unwrap is pending. */
+  /** xy per corner in 0-1 chart space, or undefined when unwrap is pending. */
   uv2: Float32Array | undefined;
   triangleCount: number;
   texelSize: number;
+  lightmapSizeHint: [number, number] | undefined;
   albedoOnUv2: MeshInput['albedoOnUv2'];
   emissionOnUv2: MeshInput['emissionOnUv2'];
   material: MeshInput['material'];
@@ -181,6 +182,7 @@ export class BakeScene {
       uv2,
       triangleCount,
       texelSize: mesh.texelSize ?? DEFAULT_TEXEL_SIZE,
+      lightmapSizeHint: mesh.lightmapSizeHint,
       albedoOnUv2: mesh.albedoOnUv2,
       emissionOnUv2: mesh.emissionOnUv2,
       material: mesh.material,

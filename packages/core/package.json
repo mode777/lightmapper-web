@@ -11,5 +11,9 @@
   },
   "files": [
     "src"
-  ]
+  ],
+  "dependencies": {
+    "@lightmapper/gbuffer": "0.0.1",
+    "@lightmapper/shaders": "0.0.1"
+  }
 }

@@ -27,6 +27,7 @@ export const STRUCT_SIZES = {
   clusterAABB: 32,
   bakeParameters: 128,
   params: 32,
+  rasterPushConstant: 64,
   denoiseParams: 32,
 } as const;
 
@@ -129,6 +130,23 @@ export interface GpuParams {
   regionOfs: Vec2; // i32 x 2
   probeCount: number; // u32
   denoiserRange: number; // u32
+}
+
+/**
+ * Mirrors the `Params` uniform buffer (dynamic offset, group 2 binding 0)
+ * of the raster kernels — the GLSL push constant of `lm_raster.glsl`
+ * (std430, 64 bytes). Note `atlasSize` is **float2** here, unlike
+ * `GpuBakeParameters.atlasSize` (int2).
+ */
+export interface GpuRasterPushConstant {
+  atlasSize: Vec2; // f32 × 2
+  uvOffset: Vec2; // f32 × 2 (half-pixel quirk, see lm_raster.wgsl)
+  toCellSize: Vec3; // f32 × 3
+  baseTriangle: number; // u32
+  toCellOffset: Vec3; // f32 × 3
+  bias: number; // f32
+  gridSize: Vec3; // i32 × 3
+  pad2: number; // u32
 }
 
 /** Mirrors the `DenoiseParams` uniform (32 bytes). */
@@ -248,6 +266,26 @@ export function writeParams(view: DataView, o: number, p: GpuParams): void {
   view.setInt32(o + 20, p.regionOfs[1], true);
   view.setUint32(o + 24, p.probeCount, true);
   view.setUint32(o + 28, p.denoiserRange, true);
+}
+
+/** Mirrors the lm_raster.glsl push constant (std430, 64 bytes). */
+export function writeRasterPushConstant(view: DataView, o: number, p: GpuRasterPushConstant): void {
+  view.setFloat32(o + 0, p.atlasSize[0], true);
+  view.setFloat32(o + 4, p.atlasSize[1], true);
+  view.setFloat32(o + 8, p.uvOffset[0], true);
+  view.setFloat32(o + 12, p.uvOffset[1], true);
+  view.setFloat32(o + 16, p.toCellSize[0], true);
+  view.setFloat32(o + 20, p.toCellSize[1], true);
+  view.setFloat32(o + 24, p.toCellSize[2], true);
+  view.setUint32(o + 28, p.baseTriangle, true);
+  view.setFloat32(o + 32, p.toCellOffset[0], true);
+  view.setFloat32(o + 36, p.toCellOffset[1], true);
+  view.setFloat32(o + 40, p.toCellOffset[2], true);
+  view.setFloat32(o + 44, p.bias, true);
+  view.setInt32(o + 48, p.gridSize[0], true);
+  view.setInt32(o + 52, p.gridSize[1], true);
+  view.setInt32(o + 56, p.gridSize[2], true);
+  view.setUint32(o + 60, p.pad2, true);
 }
 
 export function writeDenoiseParams(view: DataView, o: number, p: GpuDenoiseParams): void {

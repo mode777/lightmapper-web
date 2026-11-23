@@ -114,13 +114,13 @@ export interface AccelStructures {
   /** `Triangle[]` storage-buffer bytes (sorted by slice). */
   triangles: ArrayBuffer;
   /** u32 triangle indices, cell-cluster order. */
-  triangleIndices: Uint32Array;
+  triangleIndices: Uint32Array<ArrayBuffer>;
   /** u32 pairs per solid cell: [cluster_start, triangle_start]. */
-  clusterIndices: Uint32Array;
+  clusterIndices: Uint32Array<ArrayBuffer>;
   /** `ClusterAABB[]` bytes. */
   clusterAabbs: ArrayBuffer;
   /** rg32uint grid texture data: gridSize³ × [count, solid_cell_index]. */
-  grid: Uint32Array;
+  grid: Uint32Array<ArrayBuffer>;
   /** `Seam[]` bytes (uvec2 a, uvec2 b — 16 B per seam), sorted by slice. */
   seams: ArrayBuffer;
   /** Triangles per atlas slice. */

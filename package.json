@@ -10,7 +10,7 @@
     "demos/*"
   ],
   "scripts": {
-    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/unwrap/tsconfig.json && tsc -p demos/cornell/tsconfig.json",
+    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/shaders/tsconfig.json && tsc -p packages/unwrap/tsconfig.json && tsc -p packages/gbuffer/tsconfig.json && tsc -p demos/cornell/tsconfig.json",
     "test": "vitest run",
     "build:demo": "npm run build -w demos/cornell",
     "check:shaders": "cargo run --quiet --manifest-path tools/wgsl-check/Cargo.toml",

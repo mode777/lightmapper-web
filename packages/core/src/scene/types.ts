@@ -36,14 +36,14 @@ export const GENERATE_PROBES_SUBDIV: Record<GenerateProbesMode, number> = {
 export interface AlbedoOnUv2Image {
   width: number;
   height: number;
-  data: Uint8Array;
+  data: Uint8Array<ArrayBuffer>;
 }
 
 /** Emission-on-UV2 image, rgbah (`data` = width*height*4 f16 words). */
 export interface EmissionOnUv2Image {
   width: number;
   height: number;
-  data: Uint16Array;
+  data: Uint16Array<ArrayBuffer>;
 }
 
 /**
@@ -55,7 +55,7 @@ export interface GltfLikeMaterial {
   /** Linear base color; defaults to white. */
   baseColor?: ColorRgb;
   /** Base color texture (rgba8, sRGB-decoded by the supplier); optional. */
-  baseColorTexture?: { width: number; height: number; data: Uint8Array };
+  baseColorTexture?: { width: number; height: number; data: Uint8Array<ArrayBuffer> };
   /** 0–1; metallic surfaces contribute no diffuse albedo. Default 0. */
   metallic?: number;
   /** 0–1, unused by the bake (kept for glTF fidelity). Default 1. */
@@ -87,6 +87,12 @@ export interface MeshInput {
   uv2?: Float32Array;
   /** World units per lightmap texel — unwrap/packing hint (Godot `texel_size`). Default 0.2. */
   texelSize?: number;
+  /**
+   * Lightmap image size hint for `@lightmapper/gbuffer` rendering, in texels
+   * (Godot: `Mesh.get_lightmap_size_hint()`, defaulting to 64×64 when unset).
+   * Ignored when `albedoOnUv2`/`emissionOnUv2` are supplied directly.
+   */
+  lightmapSizeHint?: [number, number];
   /** User-supplied albedo image on the mesh's UV2 (Godot `albedo_on_uv2`). */
   albedoOnUv2?: AlbedoOnUv2Image;
   /** User-supplied emission image on the mesh's UV2 (Godot `emission_on_uv2`, rgbah). */
