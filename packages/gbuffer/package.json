@@ -1,0 +1,18 @@
+{
+  "name": "@lightmapper/gbuffer",
+  "version": "0.0.1",
+  "description": "Minimal bake_render_uv2 replacement — renders albedo/emission-on-UV2 from glTF-like materials",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@lightmapper/core": "0.0.1"
+  }
+}
