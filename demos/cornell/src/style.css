@@ -136,3 +136,54 @@ a {
 #roadmap-status li:not([data-state='done']) {
   color: var(--muted);
 }
+
+/* M2 stage runner */
+
+#run-m2 {
+  font: inherit;
+  font-weight: 600;
+  color: #06251e;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+}
+
+#run-m2:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+#m2-status {
+  min-height: 1.4em;
+}
+
+.slice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.slice-view {
+  text-align: center;
+}
+
+.slice-view p {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.slice-view canvas {
+  border: 1px solid #2a323d;
+  border-radius: 6px;
+  image-rendering: pixelated;
+  background: #000;
+}
+
+#m2-output h3 {
+  margin: 0.75rem 0 0.5rem;
+  font-size: 0.95rem;
+}

@@ -27,11 +27,23 @@
       </section>
 
       <section class="card">
+        <h2>M2 — G-buffer stage</h2>
+        <p>
+          Runs the milestone-2 pipeline on the fixture scene: material UV2 rendering →
+          atlas packing → acceleration structure → raster split passes
+          (position/unocclude + normal, ADR-0004) → un-occlusion kernel.
+        </p>
+        <p><button id="run-m2" disabled>Run M2 stage</button></p>
+        <p id="m2-status">Waiting for the capability probe…</p>
+        <div id="m2-output"></div>
+      </section>
+
+      <section class="card">
         <h2>Roadmap status</h2>
         <ul id="roadmap-status">
           <li data-state="done"><b>M0 — Foundations</b> repo, CI (typecheck + unit + naga WGSL validation), demo shell, bit-exact hash &amp; struct-layout ports</li>
-          <li data-state="todo"><b>M1 — Data plane</b> scene API, atlas packer, acceleration structure</li>
-          <li data-state="todo"><b>M2 — G-buffer</b> split raster passes, un-occlusion</li>
+          <li data-state="done"><b>M1 — Data plane</b> scene API, atlas packer, acceleration structure</li>
+          <li data-state="doing"><b>M2 — G-buffer</b> split raster passes, un-occlusion</li>
           <li data-state="todo"><b>M3 — Direct light</b> primary kernel, soft shadows, transparency</li>
           <li data-state="todo"><b>M4 — Indirect + probes</b> bounce kernel, environment, light probes</li>
           <li data-state="todo"><b>M5 — Finishing</b> JNLM denoise, seam blending, dilate</li>
