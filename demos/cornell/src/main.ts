@@ -212,6 +212,18 @@ function wireM2Runner(): void {
   const button = document.getElementById('run-m2');
   if (!button) return;
   button.addEventListener('click', () => void runM2Stage());
+  // Headless verification hook: `?autorun` runs the stage as soon as the
+  // capability probe has a device (software-WebGPU verification box).
+  if (typeof location !== 'undefined' && /[?&]autorun\b/.test(location.search)) {
+    const tryRun = (attempt: number): void => {
+      if (!button.hasAttribute('disabled')) {
+        void runM2Stage();
+      } else if (attempt < 40) {
+        setTimeout(() => tryRun(attempt + 1), 250);
+      }
+    };
+    setTimeout(() => tryRun(0), 250);
+  }
 }
 
 void runProbe();
