@@ -8,17 +8,24 @@
 // traversal via lm_trace_inc.wgsl (trace_ray).
 // License: MIT — Godot Engine contributors. See NOTICE.md.
 //
+// PORT: upstream binds `position`/`unocclude` as read_write rgba32f images.
+// read-write rgba32f storage textures are not universally available
+// (SwiftShader among others rejects them), so the documented fallback
+// (ARCHITECTURE §4) is realized here: *sampled* source textures plus
+// *write-only* destination textures (ping-pong). Every texel in bounds is
+// stored, covered or not, so the destinations are fully defined without a
+// clear. The kernel math is unchanged; the driver swaps the texture
+// references afterwards (Godot uses SWAP() macros for the same purpose).
+//
 // Binding map (docs/DESIGN.md §5):
 //   group 0 — shared base set (lm_common_inc.wgsl)
 //   group 1 — kernel I/O:
-//     binding 0: position   — texture_storage_2d_array<rgba32float, read_write>
-//     binding 1: unocclude  — texture_storage_2d_array<rgba32float, read_write>
+//     binding 0: position_src   — texture_2d_array<f32> (rgba32float, load)
+//     binding 1: unocclude_src  — texture_2d_array<f32> (rgba32float, load)
+//     binding 2: position_dst   — texture_storage_2d_array<rgba32float, write>
+//     binding 3: unocclude_dst  — texture_storage_2d_array<rgba32float, write>
 //   group 2 — per-dispatch Params (push-constant replacement, ADR-0003):
 //     binding 0: Params uniform buffer (dynamic offset)
-//
-// PORT: Godot binds these as GLSL `image2DArray` with rgba32f — WebGPU
-// read_write storage textures (ARCHITECTURE §4; ping-pong fallback would be
-// a documented deviation if an adapter rejects read-write rgba32f).
 
 #include "lm_common_inc.wgsl"
 #include "lm_trace_inc.wgsl"
@@ -34,8 +41,10 @@ struct Params {
   denoiser_range: u32,
 }
 
-@group(1) @binding(0) var position_tex: texture_storage_2d_array<rgba32float, read_write>;
-@group(1) @binding(1) var unocclude_tex: texture_storage_2d_array<rgba32float, read_write>;
+@group(1) @binding(0) var position_src: texture_2d_array<f32>;
+@group(1) @binding(1) var unocclude_src: texture_2d_array<f32>;
+@group(1) @binding(2) var position_dst: texture_storage_2d_array<rgba32float, write>;
+@group(1) @binding(3) var unocclude_dst: texture_storage_2d_array<rgba32float, write>;
 @group(2) @binding(0) var<uniform> params: Params;
 
 @compute @workgroup_size(8, 8)
@@ -49,13 +58,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   //texel_size = 0.5;
   //compute tangents
 
-  var position_alpha = textureLoad(position_tex, atlas_pos, i32(params.atlas_slice));
+  var position_alpha = textureLoad(position_src, atlas_pos, i32(params.atlas_slice), 0);
   if (position_alpha.a < 0.5) {
+    // Pass the empty texel through so the destination stays fully defined.
+    textureStore(position_dst, atlas_pos, i32(params.atlas_slice), position_alpha);
+    textureStore(unocclude_dst, atlas_pos, i32(params.atlas_slice), vec4<f32>(0.0, 0.0, 0.0, 0.0));
     return;
   }
 
   var vertex_pos = position_alpha.xyz;
-  let normal_tsize = textureLoad(unocclude_tex, atlas_pos, i32(params.atlas_slice));
+  let normal_tsize = textureLoad(unocclude_src, atlas_pos, i32(params.atlas_slice), 0);
 
   let face_normal = normal_tsize.xyz;
   let texel_size = normal_tsize.w;
@@ -90,6 +102,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // assignment, so rebuild the vec4 (alpha keeps the rasterized 1.0).
   position_alpha = vec4<f32>(vertex_pos, position_alpha.a);
 
-  textureStore(position_tex, atlas_pos, i32(params.atlas_slice), position_alpha);
-  textureStore(unocclude_tex, atlas_pos, i32(params.atlas_slice), vec4<f32>(unocclude_mask, 0.0, 0.0, 0.0));
+  textureStore(position_dst, atlas_pos, i32(params.atlas_slice), position_alpha);
+  textureStore(unocclude_dst, atlas_pos, i32(params.atlas_slice), vec4<f32>(unocclude_mask, 0.0, 0.0, 0.0));
 }

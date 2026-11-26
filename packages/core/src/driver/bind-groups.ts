@@ -124,10 +124,13 @@ export function createBaseBindGroup(
 /**
  * Group 2 — the per-dispatch `Params` uniform with dynamic offset
  * (ADR-0003). One layout + one bind group serve every kernel and render
- * pass; `minBindingSize: 64` covers the largest push constant in the port
- * (RasterPushConstant; the compute Params is 32 B).
+ * pass. The binding's `size` is one ring slot (it must be set explicitly —
+ * without it the bound range is the whole buffer and every non-zero
+ * dynamic offset is out of bounds); `minBindingSize` covers the largest
+ * push constant in the port (RasterPushConstant, 64 B; compute Params is
+ * 32 B).
  */
-export function createParamsBindGroup(device: GPUDevice, ring: { buffer: GPUBuffer }): {
+export function createParamsBindGroup(device: GPUDevice, ring: { buffer: GPUBuffer; slotBytes: number }): {
   layout: GPUBindGroupLayout;
   bindGroup: GPUBindGroup;
 } {
@@ -144,7 +147,7 @@ export function createParamsBindGroup(device: GPUDevice, ring: { buffer: GPUBuff
   const bindGroup = device.createBindGroup({
     label: 'lightmapper-params',
     layout,
-    entries: [{ binding: 0, resource: { buffer: ring.buffer } }],
+    entries: [{ binding: 0, resource: { buffer: ring.buffer, size: ring.slotBytes } }],
   });
   return { layout, bindGroup };
 }

@@ -22,6 +22,10 @@
  *    AABB region offset goes to the kernel as a pipeline override constant.
  *  - ADR-0003: raster/unocclude push constants live in the group-2 Params
  *    ring buffer (dynamic offsets) instead of API push constants.
+ *  - PORT: unocclude is a ping-pong (sampled sources → write-only
+ *    destinations) instead of upstream's read_write rgba32f images, which
+ *    not every implementation supports; the destination textures become
+ *    the canonical post-unocclude textures (no copies needed).
  *  - Ordering: Godot ends the draw list, then begins the compute list —
  *    "no barrier, let them run all together" per slice. WebGPU's automatic
  *    pass-ordering handles the render→compute dependency in one submit.
@@ -82,6 +86,11 @@ export async function runGBufferStage(
   const registry = new GpuResourceRegistry(device);
   const [width, height] = inputs.atlasSize;
   const slices = inputs.atlasSlices;
+
+  // WebGPU validation errors do NOT throw — invalid commands become silent
+  // no-ops. Push an error scope around the whole stage so any validation
+  // failure surfaces as a rejected promise instead of an empty bake.
+  device.pushErrorScope('validation');
 
   /* --- textures ------------------------------------------------------ */
 
@@ -192,6 +201,7 @@ export async function runGBufferStage(
   }
   const gridTex = registry.texture({
     label: 'lightmapper-grid',
+    dimension: '3d',
     size: { width: inputs.accel.gridSize, height: inputs.accel.gridSize, depthOrArrayLayers: inputs.accel.gridSize },
     format: 'rg32uint',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
@@ -230,7 +240,15 @@ export async function runGBufferStage(
     depthWriteEnabled: true,
     depthCompare: 'less', // "so it does render same pixel twice"
   };
-  const rasterLayout = device.createPipelineLayout({ bindGroupLayouts: [baseLayout, paramsLayout] });
+  // Pipeline-layout array index == @group() index. The raster kernel uses
+  // groups 0 and 2 (canonical map, DESIGN §5), so group 1 gets an empty
+  // placeholder layout — otherwise the pipelines fail validation and
+  // WebGPU silently drops every draw (validation errors don't throw).
+  const emptyLayout = device.createBindGroupLayout({ label: 'lightmapper-empty-g1', entries: [] });
+  const emptyBindGroup = device.createBindGroup({ label: 'lightmapper-empty-g1', layout: emptyLayout, entries: [] });
+  const rasterLayout = device.createPipelineLayout({
+    bindGroupLayouts: [baseLayout, emptyLayout, paramsLayout],
+  });
   const makeRasterPipeline = (
     vertexEntry: 'vs_main' | 'vs_edges_main',
     fragmentEntry: 'fa_main' | 'fb_main',
@@ -241,7 +259,12 @@ export async function runGBufferStage(
       layout: rasterLayout,
       vertex: { module: rasterModule, entryPoint: vertexEntry },
       fragment: { module: rasterModule, entryPoint: fragmentEntry, targets },
-      primitive: { topology: 'triangle-list' },
+      // RD::PipelineRasterizationState defaults: no culling (both sides of
+      // every surface are rasterized), so frontFace is irrelevant here.
+      // NOTE for future culling passes: Godot's default is
+      // POLYGON_FRONT_FACE_CLOCKWISE in framebuffer space, but the Y flip
+      // in lm_raster.wgsl mirrors the winding — use frontFace 'ccw' then.
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
       depthStencil,
     });
 
@@ -259,12 +282,31 @@ export async function runGBufferStage(
   const wireB = makeRasterPipeline('vs_edges_main', 'fb_main', targetsB);
 
   // Unocclude pipeline (ADR-0005: pass the merged-buffer AABB offset).
+  // PORT: ping-pong instead of upstream's read_write rgba32f images — the
+  // kernel samples the raster outputs and stores into fresh destinations
+  // (see lm_unocclude.wgsl header). The destinations become the canonical
+  // post-unocclude textures handed to later stages.
   const unoccludeModule = device.createShaderModule({ label: 'lm_unocclude', code: lmUnocclude });
+  const positionOutTex = registry.texture({
+    label: 'lightmapper-position-out',
+    size: { width, height, depthOrArrayLayers: slices },
+    format: 'rgba32float',
+    usage: rasterUsage,
+  });
+  const unoccludeOutTex = registry.texture({
+    label: 'lightmapper-unocclude-out',
+    size: { width, height, depthOrArrayLayers: slices },
+    format: 'rgba32float',
+    usage: rasterUsage,
+  });
   const unoccludeGroup1Layout = device.createBindGroupLayout({
     label: 'lm_unocclude-io',
     entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'read-write', format: 'rgba32float', viewDimension: '2d-array' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'read-write', format: 'rgba32float', viewDimension: '2d-array' } },
+      // rgba32float is only sampleable (never filterable) in core WebGPU.
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba32float', viewDimension: '2d-array' } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba32float', viewDimension: '2d-array' } },
     ],
   });
   const unoccludeBindGroup1 = device.createBindGroup({
@@ -273,6 +315,8 @@ export async function runGBufferStage(
     entries: [
       { binding: 0, resource: positionTex.createView({ dimension: '2d-array' }) },
       { binding: 1, resource: unoccludeTex.createView({ dimension: '2d-array' }) },
+      { binding: 2, resource: positionOutTex.createView({ dimension: '2d-array' }) },
+      { binding: 3, resource: unoccludeOutTex.createView({ dimension: '2d-array' }) },
     ],
   });
   const unoccludePipeline = device.createComputePipeline({
@@ -328,11 +372,13 @@ export async function runGBufferStage(
       //draw opaque
       pass.setPipeline(fill);
       pass.setBindGroup(0, baseBindGroup);
+      pass.setBindGroup(1, emptyBindGroup); // placeholder for the canonical group 2
       pass.setBindGroup(2, paramsBindGroup, [rasterOffset]);
       pass.draw(vertexCount);
       //draw wire (ADR-0007: edge-expanded emulation)
       pass.setPipeline(wire);
       pass.setBindGroup(0, baseBindGroup);
+      pass.setBindGroup(1, emptyBindGroup);
       pass.setBindGroup(2, paramsBindGroup, [rasterOffset]);
       pass.draw(vertexCount);
     };
@@ -400,14 +446,24 @@ export async function runGBufferStage(
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
 
+  const validationError = await device.popErrorScope();
+  if (validationError !== null) {
+    throw new Error(`G-buffer stage GPU validation error: ${validationError.message}`);
+  }
+
+  // The raster-stage sources are dead once unocclude has run — free them
+  // now (ARCHITECTURE §5: destroy targets at their last consumer).
+  registry.destroyTexture(positionTex);
+  registry.destroyTexture(unoccludeTex);
+
   /* --- readback (DEBUG_TEXTURES equivalents) --------------------------- */
 
   const position: ReadbackImage32F[] = [];
   const unocclude: ReadbackImage32F[] = [];
   const normal: ReadbackImage16F[] = [];
   for (let i = 0; i < slices; i++) {
-    position.push((await readbackSlice(device, positionTex, 'rgba32float', i)) as ReadbackImage32F);
-    unocclude.push((await readbackSlice(device, unoccludeTex, 'rgba32float', i)) as ReadbackImage32F);
+    position.push((await readbackSlice(device, positionOutTex, 'rgba32float', i)) as ReadbackImage32F);
+    unocclude.push((await readbackSlice(device, unoccludeOutTex, 'rgba32float', i)) as ReadbackImage32F);
     normal.push((await readbackSlice(device, normalTex, 'rgba16float', i)) as ReadbackImage16F);
   }
 
@@ -415,9 +471,10 @@ export async function runGBufferStage(
     position,
     unocclude,
     normal,
-    textures: { position: positionTex, normal: normalTex, unocclude: unoccludeTex },
+    // Canonical post-unocclude textures for later stages (M3 samples these).
+    textures: { position: positionOutTex, normal: normalTex, unocclude: unoccludeOutTex },
     destroy: () => {
-      ring.destroy(); // (GPUBuffer.destroy is idempotent)
+      ring.destroy();
       registry.destroyAll();
     },
   };

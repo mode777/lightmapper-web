@@ -138,7 +138,12 @@ fn vertex_main_impl(vertex_index: u32, expand_edges: bool) -> VsOut {
     clip_uv = expand_edge_vertex(uv_interp * texel_scale, centroid) / texel_scale;
   }
 
-  out.position = vec4<f32>((clip_uv + params.uv_offset) * 2.0 - 1.0, 0.0001, 1.0);
+  // PORT: Vulkan's clip-space Y points DOWN (framebuffer row 0 is clip
+  // y = -1), WebGPU's points UP. Flip Y so atlas texel row 0 stays uv v = 0
+  // exactly like upstream — the CPU-side atlas blits, `meshRects` and every
+  // later kernel's texel↔uv mapping rely on that orientation.
+  let clip = (clip_uv + params.uv_offset) * 2.0 - vec2<f32>(1.0);
+  out.position = vec4<f32>(clip.x, -clip.y, 0.0001, 1.0);
   return out;
 }
 
