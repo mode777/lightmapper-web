@@ -44,6 +44,13 @@ new ADR that references the old one — never edit history.
   rebind per dispatch.
 - **Consequences:** Negligible cost at our dispatch rates; uniform struct
   layouts stay byte-identical to the GLSL push-constant layouts.
+- **Note (2026-11-26, M2 realization):** two WebGPU details this relies on.
+  (1) A pipeline layout's array index *is* the `@group()` index, so render
+  kernels (groups 0 + 2) take an empty placeholder layout and bind group in
+  slot 1. (2) The dynamic-offset binding must declare an explicit `size`
+  (one ring slot) — with the default whole-buffer range every non-zero
+  offset is a validation error, and validation errors are silent no-ops
+  (see the playbook §5.10).
 
 ## ADR-0004: Split the G-buffer raster pass
 
@@ -74,6 +81,12 @@ new ADR that references the old one — never edit history.
   pairs at a known element offset). Keep Godot numbering elsewhere.
 - **Consequences:** Worst-case storage-buffer usage is exactly 8. Documented
   delta from `lm_common_inc.glsl` (DESIGN §5).
+- **Note (2026-11-26, M2 realization):** the "known element offset" travels
+  as a WGSL **pipeline override constant** (`override
+  cluster_aabb_offset_u32`), set by the driver at pipeline creation from
+  `packClusterData().aabbOffsetU32`; the include ships
+  `load_cluster_aabb()` so kernels never index the merged buffer by hand.
+  This keeps `BakeParameters` byte-identical to the GLSL struct (ADR-0008).
 
 ## ADR-0006: Environment panorama as rgba16f
 
@@ -96,6 +109,26 @@ new ADR that references the old one — never edit history.
   two-draw structure (fill, then expanded) and the shared depth behavior.
 - **Consequences:** Must be validated visually against native dumps (R2);
   fallback if insufficient: line-list topology over edges.
+- **Note (2026-11-26, M2 measurements):** implemented as decided
+  (`vs_edges_main`). Measured on the fixture with
+  `tools/verify-demo-remote.py`: the expanded draw covers exactly the ring
+  the fill pass cannot reach (984 texels, 0 missed) and stops there (0 bled
+  past 1.12 texels). Two deltas from upstream's 1-px wire are inherent to
+  "move the clip position, keep the vertex attributes" and remain **open**
+  until native goldens can be compared:
+  1. *Ring width is shape-dependent.* A 1-texel centroid push moves an edge
+     out by the push's perpendicular component: 0.45–0.71 texel for the
+     fixture's right triangles, but as little as ~0.17 texel on the long
+     edges of thin triangles (upstream: ~0.5 texel everywhere).
+  2. *Ring positions are not exact extrapolations.* The interpolant still
+     passes through the original corner values, so a ring texel reads the
+     plane at (sample − barycentric-weighted push): up to ~1 texel along
+     the surface (measured 0.87 texel at a corner), on-plane and
+     tangential. Upstream's lines interpolate exactly.
+  Options if goldens show a difference, in order of fidelity: extrapolate
+  the expanded vertices' attributes through the uv→world Jacobian (exact
+  positions, still an "edge-expanded" draw), a miter offset of 0.5 texel
+  (matches the wire's width for every shape), or the line-list fallback.
 
 ## ADR-0008: Byte-compatible wire format with Godot
 
@@ -161,3 +194,31 @@ new ADR that references the old one — never edit history.
   provenance header; quirks/deviations are marked `GODOT-QUIRK`/`PORT`.
 - **Consequences:** Mechanical re-diffs when we choose to track 4.6/4.7
   features (e.g. area lights) later.
+
+## ADR-0014: Mesh winding follows Godot — clockwise front faces
+
+- **Status:** Accepted (2026-11-26)
+- **Context:** The lightmapper derives geometry-facing information from the
+  triangle *winding*: `face_normal` in `lm_raster.glsl` (the un-occlusion
+  tangent frame and bias direction) and `normal` in `trace_ray` (front/back
+  hits, hence `cullMode`). Godot's rasterizer convention is clockwise front
+  faces (`RD::PipelineRasterizationState` defaults to
+  `POLYGON_FRONT_FACE_CLOCKWISE`), and both expressions equal
+  `SurfaceTool::generate_normals()` (`Plane(v0, v1, v2, CLOCKWISE)`). Until
+  M2, `MeshInput` left the winding undefined and the `flatFaceNormal`
+  convenience used the right-hand rule (counter-clockwise front), so a
+  normals-less mesh contradicted the kernels and was un-occluded from its
+  back side — invisible in M1, caught by the M2 analytic check on the demo
+  fixture (0.1 % of the floor flagged instead of ~1 %).
+- **Decision:** `MeshInput` triangles follow Godot: a front face is the side
+  its vertices appear *clockwise* from, geometric front normal
+  `-(v1 - v0) × (v2 - v0)`. `flatFaceNormal` computes exactly the kernels'
+  expression. Shaders stay verbatim; `cullMode: 'front' | 'back'` keeps
+  Godot's meaning. glTF and most WebGPU data are counter-clockwise front —
+  input adapters (`@lightmapper/io`, M6) reverse the index order, exactly
+  as Godot's own glTF importer does (`modules/gltf/gltf_document.cpp`:
+  "Swap around indices, convert ccw to cw for front face").
+- **Consequences:** Verbatim kernels and Godot-meaningful cull modes at the
+  cost of a documented surprise for web-native mesh data (DESIGN §1).
+  The verification fixture follows the contract, so the analytic checks in
+  `tools/verify-demo-remote.py` would catch a regression in either side.

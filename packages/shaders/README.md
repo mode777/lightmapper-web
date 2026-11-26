@@ -41,13 +41,13 @@ See `docs/PORTING_PLAYBOOK.md` and `docs/DESIGN.md §5` for the full contract:
 | Kernel | Godot source | Status |
 |---|---|---|
 | `lm_dilate.wgsl` | `lm_compute.glsl#dilate` | ✅ ported (reference example) |
-| `lm_unocclude.wgsl` | `lm_compute.glsl#unocclude` | ✅ ported (M2) |
+| `lm_unocclude.wgsl` | `lm_compute.glsl#unocclude` | ✅ ported (M2) — ping-pong (sampled sources + write-only destinations; upstream's read_write rgba32f images are not portable) |
 | `lm_primary.wgsl` | `lm_compute.glsl#primary` | ⬜ M3 |
 | `lm_secondary.wgsl` | `lm_compute.glsl#secondary` | ⬜ M4 |
 | `lm_light_probes.wgsl` | `lm_compute.glsl#light_probes` | ⬜ M4 |
 | `lm_pack_l1.wgsl` | `lm_compute.glsl#pack_coeffs` | ⬜ M5 |
 | `lm_denoise.wgsl` | `lm_compute.glsl#denoise` (JNLM) | ⬜ M5 |
-| `lm_raster.wgsl` (split pass A/B + edge expansion) | `lm_raster.glsl` | ✅ ported (M2) |
+| `lm_raster.wgsl` (split pass A/B + edge expansion) | `lm_raster.glsl` | ✅ ported (M2) — flips clip-space Y (Vulkan Y-down → WebGPU Y-up) |
 | `lm_blendseams_lines.wgsl` | `lm_blendseams.glsl#lines` | ⬜ M5 |
 | `lm_blendseams_triangles.wgsl` | `lm_blendseams.glsl#triangles` | ⬜ M5 |
 | `lm_common_inc.wgsl` (shared) | `lm_common_inc.glsl` | ✅ ported (M2) |
@@ -55,3 +55,7 @@ See `docs/PORTING_PLAYBOOK.md` and `docs/DESIGN.md §5` for the full contract:
 
 All files are validated by `tools/wgsl-check` (naga) in CI
 (`npm run check:shaders` locally if you have Rust installed).
+
+Before asking for visual verification of a raster stage, run
+`python3 tools/verify-demo-remote.py` (see `docs/PORTING_PLAYBOOK.md §7`):
+naga only proves a kernel *parses*, and WebGPU validation errors never throw.

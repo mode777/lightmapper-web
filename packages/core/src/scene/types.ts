@@ -83,7 +83,8 @@ export interface GltfLikeMaterial {
  * and front/back hits (`trace_ray`, `cullMode`) from the winding. Supply
  * vertex normals pointing to the lit side and wind triangles clockwise
  * seen from that side. glTF and most WebGPU data are counter-clockwise
- * front: reverse each triangle's index order first.
+ * front: reverse each triangle's index order first (as Godot's glTF
+ * importer does — "convert ccw to cw for front face"). See ADR-0014.
  */
 export interface MeshInput {
   /** xyz per vertex, triangle soup or indexed by `indices`. */

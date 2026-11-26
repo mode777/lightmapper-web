@@ -12,7 +12,8 @@
         <h1>lightmapper-web</h1>
         <p class="tagline">
           Godot&nbsp;4&rsquo;s GPU lightmapper, ported to WebGPU. This page will host the
-          Cornell-box bake demo (roadmap milestone M6).
+          Cornell-box bake demo (roadmap milestone M6); the G-buffer stage below
+          already runs on your GPU.
         </p>
       </header>
 
@@ -43,7 +44,7 @@
         <ul id="roadmap-status">
           <li data-state="done"><b>M0 — Foundations</b> repo, CI (typecheck + unit + naga WGSL validation), demo shell, bit-exact hash &amp; struct-layout ports</li>
           <li data-state="done"><b>M1 — Data plane</b> scene API, atlas packer, acceleration structure</li>
-          <li data-state="doing"><b>M2 — G-buffer</b> split raster passes, un-occlusion</li>
+          <li data-state="done"><b>M2 — G-buffer</b> split raster passes, un-occlusion</li>
           <li data-state="todo"><b>M3 — Direct light</b> primary kernel, soft shadows, transparency</li>
           <li data-state="todo"><b>M4 — Indirect + probes</b> bounce kernel, environment, light probes</li>
           <li data-state="todo"><b>M5 — Finishing</b> JNLM denoise, seam blending, dilate</li>

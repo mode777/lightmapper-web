@@ -1,6 +1,6 @@
 # Architecture
 
-*Last updated: 2026-11-22 (M2 done). Keep this document current with reality.*
+*Last updated: 2026-11-26 (M2 verified on software WebGPU). Keep this document current with reality.*
 
 ## 1. Mission & non-goals
 
@@ -81,7 +81,7 @@ Stage-by-stage mapping from Godot's `lightmapper_rd.cpp` to this repo:
 | 1 | blit albedo/emission | `core/src/atlas/blit.ts` | copy | typed-array blits, rgbah emission ✅ (M2); images rendered by `@lightmapper/gbuffer` |
 | 2 | acceleration structure | `core/src/accel/*` (worker) | — | byte-exact buffers; cluster indices+AABBs merged into **one** buffer (ADR-0005); worker host ✅ (M2) |
 | 3 | G-buffer raster (UV2 space) | `core/src/driver/stages/gbuffer.ts` + `lm_raster.wgsl` | render | ✅ M2 — **split into two passes** (48 B/sample > WebGPU 32 B cap, ADR-0004); wireframe pass replaced by edge-expansion (ADR-0007) |
-| 4 | un-occlude | `lm_unocclude.wgsl` | compute 8×8 | ✅ M2 — read_write storage textures; ping-pong fallback documented |
+| 4 | un-occlude | `lm_unocclude.wgsl` | compute 8×8 | ✅ M2 — **ping-pong** (sampled sources → write-only destinations): read-write rgba32f storage textures are not portable (Dawn rejects them) |
 | 5 | direct light | `lm_primary.wgsl` | compute 8×8 | Halton AA, Vogel soft shadows, transparency via albedo alpha, optional SH/`shadowmask` variants via `PORT:` defines |
 | 6 | indirect light | `lm_secondary.wgsl` | compute 8×8 | ray-chunked accumulation; env panorama sampled as **rgba16f** (ADR-0006) |
 | 7 | light probes | `lm_light_probes.wgsl` | compute 64×1 | SH L2 accumulation across dispatches |
@@ -126,7 +126,13 @@ Stage-by-stage mapping from Godot's `lightmapper_rd.cpp` to this repo:
   layouts, packers, accel structure), naga WGSL validation, demo build.
 - **Visual:** `deploy-demo.yml` publishes `demos/cornell` to GitHub Pages on
   every push to `main`; humans verify visually.
+- **Analytic, on demand (software WebGPU):** `tools/verify-demo-remote.py`
+  runs the demo on the verification box's headless Chrome (SwiftShader) and
+  checks the baked G-buffer against the fixture geometry — positions,
+  edge ring, un-occlusion mask. Catches silent driver/kernel regressions
+  (WebGPU validation errors never throw); says nothing about lighting parity.
 - **Golden (optional, on-GPU machines):** stage dumps compared against native
   Godot `DEBUG_TEXTURES` output — methodology in `PORTING_PLAYBOOK.md §7`.
 - The SSH build/verification server available to maintainers has **no usable
-  GPU**; treat it as a build box only (see RISKS.md R12).
+  GPU**; its software WebGPU is enough for the analytic check above and for
+  builds, not for timing or lighting parity (see RISKS.md R12).

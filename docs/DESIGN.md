@@ -1,6 +1,6 @@
 # Design
 
-*Last updated: 2026-11-22 (M2). This document is the **authoritative**
+*Last updated: 2026-11-26 (M2). This document is the **authoritative**
 specification for the public API, data contracts and WGSL binding map.
 Implementation files (TS + WGSL) must stay in lock-step with it.*
 
@@ -81,6 +81,13 @@ Semantics notes:
 - Units/coordinates: world-space right-handed, Y-up assumed (Godot convention);
   equirect panorama sampled via `atan(x,z)` mapping exactly as
   `trace_environment_color` in `lm_compute.glsl`.
+- **Winding (ADR-0014):** a triangle's front face is the side its vertices
+  appear *clockwise* from (Godot convention); geometric front normal
+  `-(v1 - v0) × (v2 - v0)`. The kernels derive `face_normal` and front/back
+  hits from it, and `flatFaceNormal` (normals omitted) computes the same
+  expression. Reverse the index order of counter-clockwise-front data.
+- Rasterized atlas orientation: texel row 0 is uv `v = 0`, as upstream on
+  Vulkan (the port flips clip-space Y — playbook §3).
 - Cancellation is cooperative between regions/draws; see ARCHITECTURE §6.
 
 ## 2. Quality presets (Godot defaults, `register_types.cpp`)
@@ -244,11 +251,23 @@ Per kernel, mirroring Godot's set 1 (e.g. dilate: 0 = dest storage image,
 1 = source texture array; primary adds 2–5 position/normal/accum/shadowmask,
 6 area-light atlas). See each `lm_*.wgsl` header.
 
+Realized so far:
+
+| Kernel | group 1 |
+|---|---|
+| `lm_raster` | *(none — groups 0 + 2 only; the driver binds an empty placeholder at index 1)* |
+| `lm_unocclude` | 0 = `position_src` texture_2d_array (rgba32f, unfilterable-float), 1 = `unocclude_src` (same), 2 = `position_dst` storage rgba32f write, 3 = `unocclude_dst` storage rgba32f write — **PORT** ping-pong, upstream uses read_write images |
+| `lm_dilate` | 0 = dest storage rgba16f write, 1 = source texture array |
+
 ### group 2 — per-dispatch `Params`
 
 Single binding 0: `Params` uniform with **dynamic offset** (256 B-aligned ring
-buffer; ADR-0003). Render passes reuse it for their push constants
-(`RasterPushConstant`, `RasterSeamsPushConstant` — same mechanism).
+buffer; ADR-0003). The binding declares an explicit `size` of one ring slot and
+`minBindingSize` 64 B (the largest push constant, `RasterPushConstant`). Render
+passes reuse it for their push constants (`RasterPushConstant`,
+`RasterSeamsPushConstant` — same mechanism); a pipeline layout's index is the
+`@group()` index, so render pipelines carry an empty placeholder layout + bind
+group at index 1.
 
 ## 6. Outputs
 

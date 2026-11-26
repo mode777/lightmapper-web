@@ -10,13 +10,19 @@ Each milestone ends with something a human can see or a test can prove.*
   demo build. Non-negotiable green.
 - **Visual:** anything user-visible lands in `demos/cornell` and is verified by
   a human on GitHub Pages after merge (deploy is automatic from `main`).
+- **Analytic (on demand):** `tools/verify-demo-remote.py` runs the demo on
+  the verification box's headless Chrome with *software* WebGPU (SwiftShader)
+  and checks the baked atlases against the fixture geometry. Not a CI gate,
+  but run it before asking for visual verification — WebGPU validation
+  errors never throw, so a broken stage otherwise looks like an empty bake.
 - **Golden (on-demand):** byte/image comparison against native Godot dumps on
   a GPU machine (methodology: PORTING_PLAYBOOK §7). Recommended at M2, M3, M5
   boundaries; not a CI gate.
 - **No extensive e2e suites** (project policy, ADR-0011). One smoke check that
   the demo page loads without console errors is the maximum browser
   automation we want.
-- The maintainer SSH box has no GPU — treat it as a build machine only (R12).
+- The maintainer SSH box has no GPU — treat it as a build machine, plus the
+  software-WebGPU analytic check above (R12).
 
 ---
 
@@ -88,10 +94,21 @@ Everything here is unit-testable without a GPU.
   `@lightmapper/shaders` and `tools/wgsl-check` — `lm_common_inc.wgsl`
   maps 1:1 to upstream. The indexed-draw vertex-pulling fallback was not
   needed (storage buffers in the vertex stage are core).
-- **Exit criteria:** code-complete; humans verify the position/normal/
+- Porting findings worth knowing (all in the playbook): clip-space Y must be
+  flipped for WebGPU; read-write rgba32f storage is not portable (unocclude
+  is a ping-pong); WebGPU validation errors never throw, so every stage
+  runs in an error scope; meshes use Godot's clockwise-front winding
+  (ADR-0014). Also fixed on the way: an integer-division bug in the SortArray
+  heap path that only the 128³ grid reaches.
+- **Verified** on software WebGPU with `tools/verify-demo-remote.py`: wall
+  positions exact to < 0.01 texel, normals exact, edge ring covered without
+  bleed, and the un-occlusion mask predicted for all 58k floor texels
+  (0 mismatches) — which exercises the ported `trace_ray` DDA.
+- **Exit criteria:** analytic checks pass; humans verify the position/normal/
   unocclude atlases on the Pages deployment after merge; golden EXR
   comparison of `1_position_*.exr` / `1_normal_*.exr` vs native remains
-  recommended when a GPU machine is available (playbook §7).
+  recommended when a GPU machine is available (playbook §7) — it is also
+  what decides the open edge-expansion deltas noted in ADR-0007.
 
 ## M3 — Direct light — est. 2–4 weeks
 

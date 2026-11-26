@@ -34,7 +34,7 @@ Pinned commit: `67421f36e5069e62573c44beb8dd2f8f91e065b0` (master 2026-11-20;
 | `lm_raster.wgsl` (+split variant) | `lm_raster.glsl` | gbuffer raster (vertex+fragment) | raster | M | **DONE (M2)** — split passes are two fragment entry points (ADR-0004 note); `dpdx/dpdy` for texel size; half-pixel uv_offset; `FA_SMOOTHEN_POSITION`; wireframe→edge expansion (ADR-0007); flat varyings; vertex pulling |
 | `lm_blendseams_lines.wgsl` | `lm_blendseams.glsl#lines` | raster | raster | M | line-list; seams indexing (`seam_subidx` 0..3 pairing); push constants per draw |
 | `lm_blendseams_triangles.wgsl` | `lm_blendseams.glsl#triangles` | raster | raster | E | z-mask draw; blend=0 |
-| `lm_unocclude.wgsl` | `lm_compute.glsl#unocclude` | compute | 8×8 | M | **DONE (M2)** — read_write rgba32f storage images; `bias×10` quirk; store mask into unocclude.a→r |
+| `lm_unocclude.wgsl` | `lm_compute.glsl#unocclude` | compute | 8×8 | M | **DONE (M2)** — ping-pong instead of read_write rgba32f images (sampled sources + write-only destinations); `bias×10` quirk; store mask into unocclude.r; validated analytically by `tools/verify-demo-remote.py` |
 | `lm_primary.wgsl` | `lm_compute.glsl#primary` | compute | 8×8 | H | `trace_ray` traversal (**already ported in `lm_trace_inc.wgsl`, M2** — bit-trick cluster/triangle masks, `firstTrailingBit`); hit-outside-cell rejection; front-face bias quirk; cull modes; `trace_direct_light` soft-shadow Vogel disk + penumbra early-inference; transparency chain; SH L1 accumulation variant; shadowmask variant |
 | `lm_secondary.wgsl` | `lm_compute.glsl#secondary` | compute | 8×8 | H | `trace_indirect_light` full path loop; `depth -= 1` transparency juggling; Russian roulette; emission × albedo_alpha.a; `USE_LIGHT_TEXTURE_FOR_BOUNCES` define; env equirect mapping |
 | `lm_light_probes.wgsl` | `lm_compute.glsl#light_probes` | compute | 64×1×1 | M | one invocation per probe; SH L2 table; accumulate across dispatches when `ray_from > 0`; final-chunk `×4/ray_count` |
@@ -85,7 +85,7 @@ post-M6.)
 | `gl_GlobalInvocationID.xy` | `@builtin(global_invocation_id) gid` | |
 | `texelFetch(tex, ivec3(p, layer), 0)` | `textureLoad(tex, p, layer, 0)` | WGSL OOB → zero; keep explicit bounds checks where GLSL relied on them |
 | `textureLod(sampler2DArray(t, s), uvw, 0)` | `textureSampleLevel(t, s, uv, layer, 0)` | |
-| `imageLoad/Store(img, ivec3(p, layer))` | `textureLoad/Store(img, p, layer)` | storage textures; `read_write` access needs the format to support it (rgba16f/rgba32f do) |
+| `imageLoad/Store(img, ivec3(p, layer))` | `textureLoad/Store(img, p, layer)` | storage textures. `read_write` is NOT portable (Dawn: "RGBA32Float does not support storage texture access ReadWrite") — bind a sampled source + a write-only destination (ping-pong), see `lm_unocclude.wgsl` |
 | `findLSB(x)` | `firstTrailingBit(x)` | |
 | `mix(a,b,t)` / `clamp` / `smoothstep` | `mix/clamp/smoothstep` | same |
 | `dFdx/dFdy` | `dpdx/dpdy` | fragment only |
@@ -95,10 +95,14 @@ post-M6.)
 | `mat3(env_transform)` (mat3x4 → mat3) | `mat3x3f(env_transform)` implicit? — construct explicitly | check WGSL: `mat3x3f(m[0].xyz, m[1].xyz, m[2].xyz)` |
 | `flat out/in` | `@interpolate(flat)` | |
 | `gl_VertexIndex` | `@builtin(vertex_index)` | |
-| `gl_Position` | `@builtin(position)` out | |
+| `gl_Position` | `@builtin(position)` out | **flip Y** — Vulkan clip-space Y points down, WebGPU's up (`clip = (uv*2-1); position = vec4(clip.x, -clip.y, z, w)`). Without it every rasterized atlas is vertically mirrored against the CPU-side blits |
 | fragment `out vec4 x` | `@location(n) out` | |
+| `a == b` / `a != b` on **vectors** | `all(a == b)` / `any(a != b)` | GLSL equality operators on vectors yield a *scalar* (all components) — a bare `vec3<bool>` is an invalid `if` condition in WGSL |
+| `cond ? a : b` | `select(a, b, cond)` | WGSL has no ternary |
+| `v.xyz = x;` (swizzle assignment) | rebuild: `v = vec4(x, v.a);` | WGSL forbids assigning to multi-component swizzles |
+| `layout(rgba32f) uniform image2DArray x` (read+write) | sampled `texture_2d_array<f32>` + write-only `texture_storage_2d_array<rgba32float, write>` | `read_write` rgba32f storage is not universal (Dawn rejects it) — ping-pong; sampled `textureLoad` takes a level argument, storage does not |
 | `#[versions]` defines | driver-side string substitution before `createShaderModule` | see §4.3 |
-| reserved words (`type`, `size`, `range`, `filter`, …) | suffix `_` | `type_`, `size_`, `range_` |
+| reserved words (`type`, `size`, `range`, `filter`, `from`, `pad`, …) | suffix `_` | `type_`, `size_`, `range_`, `from_`, `pad_` |
 
 Layout equivalence (why our bytes match): WGSL aligns `vec3<f32>` to 16 and
 `vec2<f32>` to 8 exactly like std140/std430 for these struct shapes. Every
@@ -191,6 +195,29 @@ flow stage by stage. When wiring a new kernel:
    used as storage in one pass and sampled in the next needs both usages set
    at creation and views built per usage (`STORAGE_BINDING` view vs
    `TEXTURE_BINDING` view of the same GPUTexture).
+10. **Validation errors never throw.** An invalid pipeline/bind group/draw
+    is a silent no-op that reports to the console — the bake "succeeds"
+    with empty textures. Every stage runs inside
+    `device.pushErrorScope('validation')` and rejects on the first error
+    (`runGBufferStage` shows the pattern). Do the same for new stages; the
+    M2 bugs below were all invisible until that scope existed.
+11. **Pipeline-layout indices are `@group()` indices.** A kernel using
+    groups 0 and 2 needs `[base, empty, params]` — and a bind group (even
+    an empty one) set for *every* slot, or draws fail with "No bind group
+    set at group index 1".
+12. **Dynamic-offset bindings need an explicit `size`** (one ring slot);
+    with the default whole-buffer range every non-zero offset is out of
+    bounds.
+13. **Texture `dimension`** must be set (`'3d'` for the grid) — the default
+    is a 2D array, and a `'3d'` view of it is a validation error.
+14. **NDC handedness** — see the Y-flip row in §3. Applies to every raster
+    kernel (`lm_raster`, later `lm_blendseams_*`).
+15. **Winding is semantics.** Godot's front faces are *clockwise*; the
+    kernels derive `face_normal` (bias direction, tangents) and `trace_ray`'s
+    front/back from it, exactly like `SurfaceTool::generate_normals()`
+    (`Plane(v0, v1, v2, CLOCKWISE)` = `-(v1-v0)×(v2-v0)`). Mesh inputs follow
+    that contract (DESIGN §1) and so does `flatFaceNormal`; a mesh wound the
+    other way is lit from its back side.
 
 ## 6. Memory & performance notes
 
@@ -205,6 +232,17 @@ flow stage by stage. When wiring a new kernel:
   guard this).
 
 ## 7. Golden testing against native Godot (on-demand)
+
+**Step 0 — no GPU needed (run this first).** `python3 tools/verify-demo-remote.py`
+(after `npm run build:demo`) runs the demo's M2 stage on the verification
+box's chrome-headless-shell with SwiftShader WebGPU and checks the result
+*analytically* against the fixture geometry: wall positions exact to
+< 0.01 texel, the edge-expansion ring covered without bleed, and the
+un-occlusion mask predicted for every floor texel (which validates the
+ported `trace_ray`). It only needs `SSH_HOST/SSH_USER/SSH_PASSWORD` from the
+environment. A failing run means a driver bug or a regression in a kernel;
+a passing run says nothing about *lighting* parity — that is what the
+goldens below are for. Extend the self-check when a new stage lands.
 
 1. Build a headless Godot (or use a desktop install) at the pinned commit;
    uncomment `#define DEBUG_TEXTURES` in `lightmapper_rd.cpp` — it saves

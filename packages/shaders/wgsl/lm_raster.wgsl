@@ -30,8 +30,16 @@
 // PORT: vertex pulling — vertices/triangles are read from storage buffers
 // in the vertex stage (core WebGPU) instead of using real vertex buffers.
 //
+// PORT: clip-space Y is flipped at the end of the vertex stage. Vulkan's
+// clip-space Y points down (framebuffer row 0 = clip y -1), WebGPU's points
+// up; without the flip every rasterized atlas is vertically mirrored
+// against the CPU-side blits, `meshRects` and the compute kernels' texel↔uv
+// mapping. Front faces therefore read counter-clockwise in WebGPU —
+// irrelevant here because upstream rasterizes unculled.
+//
 // Binding map (docs/DESIGN.md §5):
 //   group 0 — shared base set (lm_common_inc.wgsl)
+//   group 1 — unused (the driver binds an empty placeholder layout)
 //   group 2 — RasterParams uniform buffer (dynamic offset, ADR-0003)
 
 #include "lm_common_inc.wgsl"

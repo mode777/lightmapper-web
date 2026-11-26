@@ -5,12 +5,15 @@ package that bakes lightmap atlases and light probes for arbitrary scenes —
 no engine, no server, no native build step. Feed it meshes, lights and an
 environment; get HDR lightmaps back.
 
-> Status: **M1 done** — the CPU data plane (scene model, unwrap via xatlas,
-> atlas packer, acceleration structure) is complete and byte-verified against
-> C++ extractions of the upstream code. Next: the M2 GPU driver. See the
+> Status: **M2 done** — the CPU data plane (scene model, unwrap via xatlas,
+> atlas packer, acceleration structure) is byte-verified against C++
+> extractions of the upstream code, and the first GPU stage is live: the
+> G-buffer raster (split passes + edge expansion) and the un-occlusion kernel
+> run on WebGPU and are checked analytically against the demo fixture on a
+> software-WebGPU browser. Next: direct lighting (M3). See the
 > [roadmap](docs/ROADMAP.md) for the path to a working browser demo.
 >
-> 🎬 **Live demo (capability probe for now):** https://mode777.github.io/lightmapper-web/
+> 🎬 **Live demo (WebGPU probe + M2 G-buffer stage):** https://mode777.github.io/lightmapper-web/
 
 ## Why this exists
 
@@ -33,9 +36,12 @@ project extracts it instead. The full feasibility analysis lives in
 | Path | Contents |
 |---|---|
 | `packages/core` | TypeScript orchestration core: scene model, atlas packing, acceleration structure, bake driver |
-| `packages/shaders` | WGSL ports of Godot's lightmapper shaders (one `lm_*.wgsl` per kernel) |
-| `packages/unwrap`, `packages/gbuffer`, `packages/io`, `packages/adapters` | Future: xatlas/watlas wrapper, albedo/emission raster, glTF/PNG/EXR I/O, three.js adapters (M1+/M2+) |
+| `packages/shaders` | WGSL ports of Godot's lightmapper shaders (one `lm_*.wgsl` per kernel + shared includes), exported as source strings |
+| `packages/unwrap` | xatlas unwrapping with Godot's presets (worker-hosted) |
+| `packages/gbuffer` | Renders albedo/emission-on-UV2 from simple materials (replaces Godot's `bake_render_uv2`) |
+| `packages/io`, `packages/adapters` | Future: glTF/PNG/EXR I/O, three.js adapters (M6) |
 | `tools/wgsl-check` | naga-based WGSL validator used in CI (no GPU needed) |
+| `tools/verify-demo-remote.py` | Analytic end-to-end check of the demo on a software-WebGPU browser (on demand) |
 | `demos/cornell` | The browser demo (deployed to GitHub Pages) |
 | `docs` | Architecture, design, decisions, risks, roadmap, porting playbook, research report |
 
