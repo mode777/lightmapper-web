@@ -232,6 +232,13 @@ export async function bakeGBuffer(
   /* STEP 2: acceleration structures (worker) */
 
   const probeGeneration = scene.resolveProbes();
+  // Snapshot before the worker call — the worker build *transfers* the
+  // typed array's buffer, detaching our copy.
+  const probesBytes = new ArrayBuffer(probeGeneration.positions.byteLength);
+  new Float32Array(probesBytes).set(probeGeneration.positions);
+  const probePositions = probeGeneration.positions.length > 0
+    ? new Float32Array(probeGeneration.positions) // transferable copy
+    : null;
   const accelMeshes: AccelMesh[] = meshes.map((mesh, i) => ({
     positions: mesh.positions,
     normals: mesh.normals,
@@ -253,7 +260,7 @@ export async function bakeGBuffer(
       meshes: accelMeshes,
       atlasSize: layout.atlasSize,
       atlasSlices: layout.atlasSlices,
-      probePositions: probeGeneration.positions.length > 0 ? probeGeneration.positions : null,
+      probePositions: probePositions,
       gridSize: GRID_SIZE,
     });
   } catch (error) {
@@ -268,8 +275,6 @@ export async function bakeGBuffer(
 
   const lights = assembleLights(scene.lights);
   const lightsBytes = packLightsBuffer(lights);
-  const probesBytes = new ArrayBuffer(probeGeneration.positions.byteLength);
-  new Float32Array(probesBytes).set(probeGeneration.positions);
 
   const bounds = accel.bounds;
   const gridSize = accel.gridSize;
