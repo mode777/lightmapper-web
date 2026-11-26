@@ -11,6 +11,8 @@
  * targets are offscreen (ARCHITECTURE §5).
  */
 
+import { assertSpecConstants } from './gpu-constants.js';
+
 export interface DeviceRequestOptions {
   /** Bring your own device (skips adapter/device creation). */
   device?: GPUDevice;
@@ -23,6 +25,9 @@ export type DeviceRequestResult =
 
 /** Request the private device used by all bake stages. */
 export async function requestBakeDevice(options: DeviceRequestOptions = {}): Promise<DeviceRequestResult> {
+  // The driver uses spec-constant usage flags instead of the runtime
+  // globals (node-testable); make sure this platform agrees with them.
+  assertSpecConstants();
   if (options.device !== undefined) {
     return { ok: true, device: options.device, owned: false };
   }

@@ -122,8 +122,9 @@ async function loadMaterialRenderer(): Promise<MaterialRenderer> {
  * lightmap size hint (default 64×64) and multiplies by supersampling —
  * `Size2i(Size2(hint) * …) * factor`, where Vector2i×float truncates
  * per axis (same float→int quirk as the atlas padding).
+ * (Exported for unit tests; `bakeGBuffer` is the only caller.)
  */
-function lightmapImageSize(
+export function lightmapImageSize(
   hint: readonly [number, number] | undefined,
   supersampling: number,
 ): { width: number; height: number } {
@@ -134,8 +135,11 @@ function lightmapImageSize(
   };
 }
 
-/** Build the 12-float column-major mat3x4 env transform (BakeParameters layout). */
-function envTransform12(rotation: number[] | undefined): number[] {
+/**
+ * Build the 12-float column-major mat3x4 env transform (BakeParameters
+ * layout, docs/DESIGN.md §4.5). (Exported for unit tests.)
+ */
+export function envTransform12(rotation: number[] | undefined): number[] {
   const m = rotation ?? [1, 0, 0, 0, 1, 0, 0, 0, 1];
   // C++ fills columns: rows[0][0], rows[1][0], rows[2][0], 0, … — with our
   // column-major Mat3 (three column vectors) that is m[0..2], m[3..5], m[6..8].

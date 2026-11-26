@@ -10,6 +10,8 @@
  * Not a line-by-line port: the mechanics are WebGPU-specific.
  */
 
+import { BUFFER_USAGE, MAP_MODE } from './gpu-constants.js';
+
 export interface ReadbackImage32F {
   width: number;
   height: number;
@@ -61,7 +63,7 @@ export async function readbackSlice(
   const staging = device.createBuffer({
     label: `lightmapper-readback-${format}-${layer}`,
     size: bytesPerRow * height,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    usage: BUFFER_USAGE.COPY_DST | BUFFER_USAGE.MAP_READ,
   });
 
   const encoder = device.createCommandEncoder();
@@ -72,7 +74,7 @@ export async function readbackSlice(
   );
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
-  await staging.mapAsync(GPUMapMode.READ);
+  await staging.mapAsync(MAP_MODE.READ);
 
   const mapped = staging.getMappedRange();
   let data: Float32Array | Uint16Array | Uint8Array;

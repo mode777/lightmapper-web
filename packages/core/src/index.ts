@@ -14,6 +14,7 @@ export * from './atlas/blit.js';
 export * from './accel/sort-array.js';
 export * from './accel/accel.js';
 export * from './accel/accel-worker-client.js';
+export * from './driver/gpu-constants.js';
 export * from './driver/device.js';
 export * from './driver/registry.js';
 export * from './driver/params-ring.js';

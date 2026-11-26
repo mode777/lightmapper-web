@@ -18,6 +18,8 @@
  * (ARCHITECTURE §5 region chunking does exactly that).
  */
 
+import { BUFFER_USAGE } from './gpu-constants.js';
+
 const SCRATCH = new ArrayBuffer(256);
 const SCRATCH_BYTES = new Uint8Array(SCRATCH);
 
@@ -35,7 +37,7 @@ export class ParamsRing {
     this.buffer = device.createBuffer({
       label: 'lightmapper-params-ring',
       size: capacity * this.slotBytes,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST,
     });
   }
 

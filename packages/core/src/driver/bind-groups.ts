@@ -13,6 +13,8 @@
  * than the pipeline consumes, so the canonical set stays valid everywhere.
  */
 
+import { SHADER_STAGE } from './gpu-constants.js';
+
 export interface BaseSetResources {
   /** BakeParameters uniform (128 B, GpuBakeParameters). */
   bakeParams: GPUBuffer;
@@ -38,14 +40,11 @@ export interface BaseSetResources {
   clusterData: GPUBuffer;
 }
 
-// GPUShaderStage visibility bits are spec-defined constants (VERTEX=1,
-// FRAGMENT=2, COMPUTE=4). Numeric literals avoid the runtime global so that
-// importing this module in non-WebGPU environments (node tests) never throws.
-const STAGE_VERTEX = 0x1;
-const STAGE_FRAGMENT = 0x2;
-const STAGE_COMPUTE = 0x4;
-const ALL_STAGES = STAGE_VERTEX | STAGE_FRAGMENT | STAGE_COMPUTE;
-const NON_VERTEX = STAGE_FRAGMENT | STAGE_COMPUTE;
+// Shader-stage visibility bits come from the shared spec-constant table
+// (no runtime globals: the module must import cleanly in node tests).
+const ALL_STAGES = SHADER_STAGE.VERTEX | SHADER_STAGE.FRAGMENT | SHADER_STAGE.COMPUTE;
+const NON_VERTEX = SHADER_STAGE.FRAGMENT | SHADER_STAGE.COMPUTE;
+
 
 /** Create the canonical group-0 bind group layout (DESIGN §5). */
 export function createBaseBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
@@ -59,7 +58,7 @@ export function createBaseBindGroupLayout(device: GPUDevice): GPUBindGroupLayout
       { binding: 4, visibility: ALL_STAGES, buffer: { type: 'read-only-storage' } },
       { binding: 5, visibility: ALL_STAGES, buffer: { type: 'read-only-storage' } },
       { binding: 6, visibility: ALL_STAGES, buffer: { type: 'read-only-storage' } },
-      { binding: 7, visibility: STAGE_COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
+      { binding: 7, visibility: SHADER_STAGE.COMPUTE, texture: { sampleType: 'uint', viewDimension: '3d' } },
       { binding: 8, visibility: NON_VERTEX, texture: { sampleType: 'float', viewDimension: '2d-array' } },
       { binding: 9, visibility: NON_VERTEX, texture: { sampleType: 'float', viewDimension: '2d-array' } },
       { binding: 10, visibility: NON_VERTEX, sampler: { type: 'filtering' } },

@@ -34,6 +34,7 @@
 import { lmRaster, lmUnocclude } from '@lightmapper/shaders';
 import { createBaseBindGroup, createBaseBindGroupLayout, createBaseSamplers, createParamsBindGroup } from '../bind-groups.js';
 import { ParamsRing } from '../params-ring.js';
+import { BUFFER_USAGE, SHADER_STAGE, TEXTURE_USAGE } from '../gpu-constants.js';
 import { readbackSlice, type ReadbackImage16F, type ReadbackImage32F } from '../readback.js';
 import { GpuResourceRegistry } from '../registry.js';
 import { STRUCT_SIZES, writeBakeParameters, writeParams, writeRasterPushConstant, type GpuBakeParameters } from '../../layout/structs.js';
@@ -98,13 +99,13 @@ export async function runGBufferStage(
     label: 'lightmapper-albedo',
     size: { width, height, depthOrArrayLayers: slices },
     format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
   });
   const emissionTex = registry.texture({
     label: 'lightmapper-emission',
     size: { width, height, depthOrArrayLayers: slices },
     format: 'rgba16float',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
   });
   for (let i = 0; i < slices; i++) {
     device.queue.writeTexture(
@@ -123,8 +124,8 @@ export async function runGBufferStage(
 
   // "this will be rastered to" — usage mirrors Godot's texture block.
   const rasterUsage =
-    GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING |
-    GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING;
+    TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING |
+    TEXTURE_USAGE.COPY_SRC | TEXTURE_USAGE.TEXTURE_BINDING;
   const positionTex = registry.texture({
     label: 'lightmapper-position',
     size: { width, height, depthOrArrayLayers: slices },
@@ -147,7 +148,7 @@ export async function runGBufferStage(
     label: 'lightmapper-depth',
     size: { width, height, depthOrArrayLayers: 1 },
     format: 'depth32float',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    usage: TEXTURE_USAGE.RENDER_ATTACHMENT,
   });
 
   /* --- buffers ------------------------------------------------------- */
@@ -155,9 +156,9 @@ export async function runGBufferStage(
   const bakeParamsBytes = new ArrayBuffer(STRUCT_SIZES.bakeParameters);
   writeBakeParameters(new DataView(bakeParamsBytes), 0, inputs.bakeParameters);
 
-  const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  const storage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST;
   const bakeParamsBuffer = registry.bufferWithData(
-    { label: 'lightmapper-bake-params', size: STRUCT_SIZES.bakeParameters, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST },
+    { label: 'lightmapper-bake-params', size: STRUCT_SIZES.bakeParameters, usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST },
     bakeParamsBytes,
   );
   const verticesBuffer = registry.bufferWithData(
@@ -204,7 +205,7 @@ export async function runGBufferStage(
     dimension: '3d',
     size: { width: inputs.accel.gridSize, height: inputs.accel.gridSize, depthOrArrayLayers: inputs.accel.gridSize },
     format: 'rg32uint',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
   });
   device.queue.writeTexture(
     { texture: gridTex },
@@ -303,10 +304,10 @@ export async function runGBufferStage(
     label: 'lm_unocclude-io',
     entries: [
       // rgba32float is only sampleable (never filterable) in core WebGPU.
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba32float', viewDimension: '2d-array' } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba32float', viewDimension: '2d-array' } },
+      { binding: 0, visibility: SHADER_STAGE.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
+      { binding: 1, visibility: SHADER_STAGE.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
+      { binding: 2, visibility: SHADER_STAGE.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba32float', viewDimension: '2d-array' } },
+      { binding: 3, visibility: SHADER_STAGE.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba32float', viewDimension: '2d-array' } },
     ],
   });
   const unoccludeBindGroup1 = device.createBindGroup({
