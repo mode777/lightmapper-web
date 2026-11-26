@@ -1,6 +1,11 @@
 /**
  * Main-thread handle for the acceleration-structure worker (browser only).
  *
+ * Provenance (semantics): hosting `LightmapperRD::_create_acceleration_structures`
+ * off the main thread is our infrastructure (ARCHITECTURE §5); everything
+ * computed is the M1 port in accel/accel.ts @
+ * 67421f36e5069e62573c44beb8dd2f8f91e065b0. License: MIT (see NOTICE.md).
+ *
  * Usage:
  *   const worker = new AccelWorkerHost();
  *   const accel = await worker.build({ meshes, atlasSize, atlasSlices, ... });
@@ -42,11 +47,13 @@ export class AccelWorkerHost {
         entry.reject(new Error(`accel worker: ${data.message}`));
       }
     });
+    // A failed script load or a top-level throw never produces a message —
+    // without this the pending build() would hang forever.
+    this.worker.addEventListener('error', (event: ErrorEvent) => {
+      this.failAll(new Error(`accel worker: ${event.message || 'failed to load'}`));
+    });
     this.worker.addEventListener('messageerror', () => {
-      for (const [, entry] of this.pending) {
-        entry.reject(new Error('accel worker: message error'));
-      }
-      this.pending.clear();
+      this.failAll(new Error('accel worker: message error'));
     });
   }
 
@@ -65,10 +72,14 @@ export class AccelWorkerHost {
   }
 
   dispose(): void {
+    this.failAll(new Error('accel worker: disposed'));
+    this.worker.terminate();
+  }
+
+  private failAll(error: Error): void {
     for (const [, entry] of this.pending) {
-      entry.reject(new Error('accel worker: disposed'));
+      entry.reject(error);
     }
     this.pending.clear();
-    this.worker.terminate();
   }
 }

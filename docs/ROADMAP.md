@@ -99,7 +99,8 @@ Everything here is unit-testable without a GPU.
   is a ping-pong); WebGPU validation errors never throw, so every stage
   runs in an error scope; meshes use Godot's clockwise-front winding
   (ADR-0014). Also fixed on the way: an integer-division bug in the SortArray
-  heap path that only the 128³ grid reaches.
+  heap path that only the 128³ grid reaches, and a params-ring wrap that
+  would have corrupted bakes above 128 atlas slices (now a loud error).
 - **Verified** on software WebGPU with `tools/verify-demo-remote.py`: wall
   positions exact to < 0.01 texel, normals exact, edge ring covered without
   bleed, and the un-occlusion mask predicted for all 58k floor texels

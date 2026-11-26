@@ -225,20 +225,24 @@ SELFCHECK_JS = r"""
       // Coarse map of one box footprint (every 6th texel): got/want.
       // '.' = agree 0, 'O' = agree 1 (flagged), 'x' = want 1 got 0, '!' = want 0 got 1.
       map: (() => {
+        // Same classification as the main loop, per sampled TEXEL (its own
+        // analytic position), every 6th texel around the short box — so the
+        // only non-exact marker is '~'.
         const b = boxes[1], rows = [];
-        for (let z = b[2] - 0.25; z <= b[3] + 0.25; z += 6 * (5 / SIDE)) {
+        const texelX = (wx) => Math.round(ox + (((wx + 2) / 4) * CW + CH) * lw - 1);
+        const texelY = (wz) => Math.round(oy + (((2.5 - wz) / 5) * CW + CH) * lh - 1);
+        for (let ty = texelY(b[3] + 0.25); ty <= texelY(b[2] - 0.25); ty += 6) {
           let row = '';
-          for (let x = b[0] - 0.25; x <= b[1] + 0.25; x += 6 * (4 / SIDE)) {
-            // world → floor texel
-            const u = 0.01 + 0.98 * (x + 2) / 4, v = 0.01 + 0.98 * (2.5 - z) / 5;
-            const tx = Math.round(ox + u * lw - 1), ty = Math.round(oy + v * lh - 1);
+          for (let tx = texelX(b[0] - 0.25); tx <= texelX(b[1] + 0.25); tx += 6) {
             const i = (ty * W + tx) * 4;
             if (pos[i + 3] < 0.5) { row += ' '; continue; }
-            const got = uno[i] > 0.5 ? 1 : 0;
-            const inside = x > b[0] && x < b[1] && z > b[2] && z < b[3];
-            const d = inside ? Math.min(x - b[0], b[1] - x, z - b[2], b[3] - z) : Infinity;
+            const wx = -2 + 4 * (((tx + 1 - ox) / lw - CH) / CW);
+            const wz = 2.5 - 5 * (((ty + 1 - oy) / lh - CH) / CW);
+            const inside = wx > b[0] && wx < b[1] && wz > b[2] && wz < b[3];
+            const d = inside ? Math.min(wx - b[0], b[1] - wx, wz - b[2], b[3] - wz) : Infinity;
             const want = inside && d > bias && d < rayLen ? 1 : 0;
             const near = inside && (Math.abs(d - rayLen) < band || Math.abs(d - bias) < 0.012);
+            const got = uno[i] > 0.5 ? 1 : 0;
             row += near ? '~' : got === want ? (got ? 'O' : '.') : (want ? 'x' : '!');
           }
           rows.push(row);
@@ -252,15 +256,36 @@ SELFCHECK_JS = r"""
 
 # Runs on the box. stdlib only (no pip / websocket-client there).
 REMOTE_DRIVER = r"""#!/usr/bin/env python3
-import base64, json, os, socket, struct, subprocess, sys, time, urllib.request
+import base64, functools, http.server, json, os, shutil, socket, struct, subprocess, sys, threading, time, urllib.request
 
 CHROME = os.path.expanduser(sys.argv[1])
-PORT = int(sys.argv[2])
-FLAGS = json.loads(sys.argv[3])
-POLL = base64.b64decode(sys.argv[4]).decode()
-SCREENSHOT = sys.argv[5]
-SELFCHECK = base64.b64decode(sys.argv[6]).decode()
-URL = "http://127.0.0.1:%d/index.html?autorun" % PORT
+FLAGS = json.loads(sys.argv[2])
+POLL = base64.b64decode(sys.argv[3]).decode()
+SCREENSHOT = sys.argv[4]
+SELFCHECK = base64.b64decode(sys.argv[5]).decode()
+DOCROOT = sys.argv[6]
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    # Keep the driver's output down to the RESULT line.
+    def log_message(self, *args):
+        pass
+
+
+def serve(docroot):
+    # In-process server on an OS-assigned loopback port: nothing to orphan,
+    # to collide with, or to mistake for a stale build. Loopback is a secure
+    # context, which WebGPU requires (about:blank has no navigator.gpu).
+    handler = functools.partial(QuietHandler, directory=docroot)
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 class MiniWS:
@@ -323,9 +348,11 @@ class MiniWS:
 
 
 def main():
-    cdp = 9321
-    profile = "/tmp/lightmapper-verify-profile"
+    cdp = free_port()
+    profile = "/tmp/lightmapper-verify-profile-%d" % cdp
     subprocess.run(["rm", "-rf", profile], check=False)
+    httpd = serve(DOCROOT)
+    url = "http://127.0.0.1:%d/index.html?autorun" % httpd.server_address[1]
     chrome = subprocess.Popen(
         [CHROME, "--headless", "--no-sandbox", "--disable-gpu-sandbox",
          "--user-data-dir=" + profile, "--remote-debugging-port=%d" % cdp,
@@ -360,7 +387,7 @@ def main():
                     return msg.get("result", {})
 
         call("Page.enable")
-        call("Page.navigate", {"url": URL})
+        call("Page.navigate", {"url": url})
         state = None
         deadline = time.time() + 240
         while time.time() < deadline:
@@ -390,6 +417,9 @@ def main():
             chrome.wait(10)
         except subprocess.TimeoutExpired:
             chrome.kill()
+        httpd.shutdown()
+        httpd.server_close()
+        shutil.rmtree(profile, ignore_errors=True)
 
 
 main()
@@ -416,6 +446,9 @@ def main():
         sys.exit("demos/cornell/dist is missing — run `npm run build:demo` first.")
 
     ssh = paramiko.SSHClient()
+    # Hosts already in known_hosts are verified; unknown ones are trusted on
+    # first use (the box is reached by name/IP from the environment).
+    ssh.load_system_host_keys()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(os.environ["SSH_HOST"], username=os.environ["SSH_USER"],
                 password=os.environ["SSH_PASSWORD"], timeout=20)
@@ -440,14 +473,10 @@ def main():
         shot_remote = "/tmp/lightmapper-verify.png" if args.screenshot else ""
         out, err = rrun(
             ssh,
-            # NOTE: no pkill-by-pattern — the pattern would match this very
-            # command line and kill the shell. The server is tracked by pid.
-            "cd {d}/docroot && setsid python3 -m http.server {p} </dev/null >/dev/null 2>&1 & "
-            "echo $! > /tmp/lightmapper-verify.pid; sleep 0.7; "
-            "curl -s -o /dev/null -w 'serve: %{{http_code}}\\n' http://127.0.0.1:{p}/index.html; "
-            "python3 {d}/drive.py '{c}' {p} '{f}' '{b}' '{s}' '{k}'; "
-            "kill $(cat /tmp/lightmapper-verify.pid) 2>/dev/null; true".format(
-                d=remote_dir, p=args.port, c=chrome,
+            # The driver serves the build itself (in-process, ephemeral port)
+            # and drives the browser; one bounded process, nothing left behind.
+            "python3 {d}/drive.py '{c}' '{f}' '{b}' '{s}' '{k}' '{d}/docroot'".format(
+                d=remote_dir, c=chrome,
                 f=json.dumps(FLAGS).replace("'", "'\\''"),
                 b=base64.b64encode(POLL_JS.encode()).decode(),
                 s=shot_remote,

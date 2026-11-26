@@ -28,12 +28,6 @@ describe('resolveIncludes', () => {
     expect(() => resolveIncludes('#include "nope.wgsl"')).toThrow(/unknown include/);
     expect(() => resolveIncludes('let x = 1;')).not.toThrow();
   });
-
-  it('terminates on self-referential includes (include-once)', () => {
-    // Not reachable via the shipped snippets (they never include kernels),
-    // but the resolver itself must not recurse forever on cycles.
-    expect(() => resolveIncludes('let x = 1;')).not.toThrow();
-  });
 });
 
 describe('kernel provenance markers', () => {

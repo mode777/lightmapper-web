@@ -232,7 +232,10 @@ export async function runGBufferStage(
     clusterData: clusterDataBuffer,
   }, samplers);
 
-  const ring = new ParamsRing(device);
+  // Two params writes per slice (raster + unocclude), all consumed by the
+  // single submit below — the ring must hold all of them (the default 256
+  // slots would only cover 128 slices; ParamsRing throws rather than wrap).
+  const ring = new ParamsRing(device, Math.max(256, 2 * slices));
   const { layout: paramsLayout, bindGroup: paramsBindGroup } = createParamsBindGroup(device, ring);
 
   const rasterModule = device.createShaderModule({ label: 'lm_raster', code: lmRaster });
@@ -347,8 +350,12 @@ export async function runGBufferStage(
     const rp = new DataView(rpBytes);
     writeRasterPushConstant(rp, 0, {
       atlasSize: [width, height],
-      // Half pixel offset is required so the rasterizer doesn't output face
-      // edges directly aligned into pixels (godotengine/godot#69126).
+      // GODOT-QUIRK: the half-pixel shift is applied to every vertex —
+      // "Half pixel offset is required so the rasterizer doesn't output face
+      // edges directly aligned into pixels. This fixes artifacts where the
+      // pixel would be traced from the edge of a face, causing half the rays
+      // to be outside of the boundaries of the geometry."
+      // (godotengine/godot#69126). A texel therefore samples uv = (n + 1)/N.
       uvOffset: [-0.5 / width, -0.5 / height],
       toCellSize: inputs.bakeParameters.toCellSize,
       baseTriangle: triangleOffset,
@@ -373,7 +380,7 @@ export async function runGBufferStage(
       //draw opaque
       pass.setPipeline(fill);
       pass.setBindGroup(0, baseBindGroup);
-      pass.setBindGroup(1, emptyBindGroup); // placeholder for the canonical group 2
+      pass.setBindGroup(1, emptyBindGroup); // placeholder: this kernel has no group 1
       pass.setBindGroup(2, paramsBindGroup, [rasterOffset]);
       pass.draw(vertexCount);
       //draw wire (ADR-0007: edge-expanded emulation)
@@ -446,6 +453,7 @@ export async function runGBufferStage(
 
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
+  ring.markSynced();
 
   const validationError = await device.popErrorScope();
   if (validationError !== null) {

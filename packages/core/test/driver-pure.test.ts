@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BUFFER_USAGE,
   CULL_BACK,
   CULL_DISABLED,
   CULL_FRONT,
   STRUCT_SIZES,
-  BUFFER_USAGE,
   TEXTURE_USAGE,
   assertSpecConstants,
+  bakeGBuffer,
   cullModeValue,
   envTransform12,
   lightmapImageSize,
+  BakeScene,
 } from '../src/index.js';
 import { GpuResourceRegistry } from '../src/driver/registry.js';
 import { ParamsRing } from '../src/driver/params-ring.js';
@@ -29,8 +31,9 @@ describe('driver pure helpers', () => {
     expect(lightmapImageSize([64, 64], 1.5)).toEqual({ width: 96, height: 96 });
     expect(lightmapImageSize([65, 65], 1.5)).toEqual({ width: 97, height: 97 }); // 97.5 → 97
     expect(lightmapImageSize([100, 100], 2)).toEqual({ width: 200, height: 200 });
-    // ERR_FAIL_COND_V(lightmap_size.x == 0 …): clamp to at least one texel.
-    expect(lightmapImageSize([2, 2], 0.4)).toEqual({ width: 1, height: 1 });
+    // ERR_FAIL_COND_V(lightmap_size.x == 0 || lightmap_size.y == 0 …) —
+    // the bake fails with BAKE_ERROR_LIGHTMAP_TOO_SMALL (see bakeGBuffer).
+    expect(lightmapImageSize([2, 2], 0.4)).toEqual({ width: 0, height: 0 });
   });
 
   it('envTransform12: column-major mat3x4 exactly as the C++ fills it', () => {
@@ -102,6 +105,8 @@ function fakeDevice(): {
   const device = {
     createBuffer: () => fakeObject(buffers),
     createTexture: () => fakeObject(textures),
+    limits: { maxTextureDimension2D: 8192 },
+    lost: new Promise<never>(() => undefined),
     queue: {
       writeBuffer: (_buffer: unknown, offset: number, data: unknown, _dataOffset?: number, size?: number) => {
         writes.push({ offset, size: size ?? (data as ArrayBuffer).byteLength });
@@ -121,19 +126,23 @@ describe('ParamsRing (ADR-0003)', () => {
     expect(writes.map((w) => [w.offset, w.size])).toEqual([[0, 256], [256, 256], [512, 256]]);
   });
 
-  it('wraps after its capacity and says so beforehand', () => {
+  it('refuses to overwrite slots the GPU may still read, until markSynced()', () => {
     const { device } = fakeDevice();
     const ring = new ParamsRing(device, 2);
     expect(ring.next(new ArrayBuffer(32))).toBe(0);
-    expect(ring.willWrap).toBe(false); // next write still goes to slot 1
     expect(ring.next(new ArrayBuffer(32))).toBe(256);
-    expect(ring.willWrap).toBe(true); // next write reuses slot 0 → sync first
+    // Every slot of this submit is handed out: a third write would wrap onto
+    // slot 0 while the GPU may still be reading it (silent corruption above
+    // 128 slices before this guard existed).
+    expect(() => ring.next(new ArrayBuffer(32))).toThrow(/markSynced/);
+    // After submit + await the whole ring is available again.
+    ring.markSynced();
     expect(ring.next(new ArrayBuffer(32))).toBe(0);
   });
 
   it('rejects structs that do not fit a slot', () => {
     const { device } = fakeDevice();
-    const ring = new ParamsRing(device, 1);
+    const ring = new ParamsRing(device, 4);
     expect(() => ring.next(new ArrayBuffer(STRUCT_SIZES.rasterPushConstant))).not.toThrow();
     expect(() => ring.next(new ArrayBuffer(257))).toThrow(/must fit/);
   });
@@ -186,5 +195,79 @@ describe('GpuResourceRegistry', () => {
     const registry = new GpuResourceRegistry(device);
     registry.destroyAll();
     expect(() => registry.buffer({ size: 16, usage: 0 })).toThrow(/destroyAll/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* bakeGBuffer: typed failures before any GPU work                     */
+/* ------------------------------------------------------------------ */
+
+function quadScene(extra: { lightmapSizeHint?: [number, number] } = {}): BakeScene {
+  const scene = new BakeScene();
+  scene.addMesh({
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]),
+    // Godot winding: clockwise from +z.
+    indices: new Uint32Array([0, 2, 1, 1, 2, 3]),
+    uv2: new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]),
+    ...extra,
+  });
+  return scene;
+}
+
+describe('bakeGBuffer — typed failures and cancellation', () => {
+  it('rejects empty scenes and meshes without uv2', async () => {
+    expect(await bakeGBuffer(new BakeScene(), {})).toEqual({ ok: false, error: 'noMeshes' });
+    const scene = new BakeScene();
+    scene.addMesh({ positions: new Float32Array(9) });
+    expect(await bakeGBuffer(scene, {})).toEqual({ ok: false, error: 'meshMissingUv2' });
+  });
+
+  it('fails with lightmapTooSmall where Godot fails (BAKE_ERROR_LIGHTMAP_TOO_SMALL)', async () => {
+    const result = await bakeGBuffer(quadScene({ lightmapSizeHint: [2, 2] }), { supersampling: 0.4 });
+    expect(result).toEqual({ ok: false, error: 'lightmapTooSmall' });
+  });
+
+  it('cancellation resolves to { aborted } instead of rejecting', async () => {
+    const { device } = fakeDevice();
+    const steps: string[] = [];
+    // Abort at the very first step…
+    expect(
+      await bakeGBuffer(quadScene(), { device, onProgress: (_f, message) => (steps.push(message), false) }),
+    ).toEqual({ ok: false, error: 'aborted' });
+    expect(steps).toEqual(['Determining optimal atlas size']);
+    // …and at the second.
+    let calls = 0;
+    expect(await bakeGBuffer(quadScene(), { device, onProgress: () => ++calls <= 1 })).toEqual({
+      ok: false,
+      error: 'aborted',
+    });
+  });
+
+  it('frees a device it created when the bake is cancelled', async () => {
+    const nav = globalThis.navigator as unknown as { gpu?: unknown };
+    if (nav === undefined || navigator.gpu !== undefined) return; // Node ≥ 21 only
+    let destroyed = 0;
+    const owned = {
+      destroy: () => void destroyed++,
+      limits: { maxTextureDimension2D: 8192 },
+      lost: new Promise<never>(() => undefined),
+    };
+    Object.defineProperty(navigator, 'gpu', {
+      configurable: true,
+      value: {
+        requestAdapter: async () => ({ requestDevice: async () => owned, info: {}, features: new Set() }),
+      },
+    });
+    try {
+      for (const abortAt of [1, 2]) {
+        destroyed = 0;
+        let calls = 0;
+        const result = await bakeGBuffer(quadScene(), { onProgress: () => ++calls <= abortAt });
+        expect(result).toEqual({ ok: false, error: 'aborted' });
+        expect(destroyed, `device freed when aborting at step ${abortAt}`).toBe(1);
+      }
+    } finally {
+      Object.defineProperty(navigator, 'gpu', { configurable: true, value: undefined });
+    }
   });
 });

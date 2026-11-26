@@ -96,12 +96,6 @@ export type BakeGBufferResult =
     }
   | { ok: false; error: BakeGBufferError };
 
-class Aborted extends Error {
-  constructor() {
-    super('bake aborted by onProgress');
-  }
-}
-
 /** Render one mesh's albedo/emission-on-UV2 images (bake_render_uv2 replacement). */
 type MaterialRenderer = (
   mesh: { positions: Float32Array; uv2: Float32Array; triangleCount: number },
@@ -121,7 +115,9 @@ async function loadMaterialRenderer(): Promise<MaterialRenderer> {
  * Compute the per-mesh lightmap image size: Godot takes the mesh's
  * lightmap size hint (default 64×64) and multiplies by supersampling —
  * `Size2i(Size2(hint) * …) * factor`, where Vector2i×float truncates
- * per axis (same float→int quirk as the atlas padding).
+ * per axis (same float→int quirk as the atlas padding). A zero axis is
+ * Godot's `BAKE_ERROR_LIGHTMAP_TOO_SMALL` (`ERR_FAIL_COND_V` on
+ * lightmap_size in lightmap_gi.cpp) — the caller fails the bake on it.
  * (Exported for unit tests; `bakeGBuffer` is the only caller.)
  */
 export function lightmapImageSize(
@@ -130,8 +126,8 @@ export function lightmapImageSize(
 ): { width: number; height: number } {
   const [hx, hy] = hint ?? DEFAULT_LIGHTMAP_SIZE;
   return {
-    width: Math.max(1, Math.trunc(hx * supersampling)),
-    height: Math.max(1, Math.trunc(hy * supersampling)),
+    width: Math.trunc(hx * supersampling),
+    height: Math.trunc(hy * supersampling),
   };
 }
 
@@ -150,13 +146,58 @@ export function envTransform12(rotation: number[] | undefined): number[] {
   ];
 }
 
+/** Signals thrown by the bake body; the wrapper maps them to typed results. */
+class Aborted extends Error {
+  constructor() {
+    super('bake aborted by onProgress');
+  }
+}
+
+class LightmapTooSmall extends Error {
+  constructor() {
+    super('a lightmap image size computed to zero');
+  }
+}
+
+class DeviceLostError extends Error {
+  constructor(info: GPUDeviceLostInfo) {
+    super(`device lost: ${info.reason ?? 'unknown'} ${info.message}`);
+  }
+}
+
+/** Who owns (and must destroy) a device created for this bake. */
+interface BakeContext {
+  ownedDevice: GPUDevice | null;
+}
+
 /**
  * Bake the G-buffer stage (M2): atlas → accel → raster + unocclude →
  * position/normal/unocclude atlas readbacks.
+ *
+ * Cancellation is cooperative (Godot `BakeStepFunc`): `onProgress`
+ * returning `false` aborts at the next step and resolves to
+ * `{ ok: false, error: 'aborted' }` — resources created so far are freed.
  */
 export async function bakeGBuffer(
   scene: BakeScene,
   options: BakeGBufferOptions = {},
+): Promise<BakeGBufferResult> {
+  const ctx: BakeContext = { ownedDevice: null };
+  try {
+    return await bakeGBufferBody(scene, options, ctx);
+  } catch (error) {
+    ctx.ownedDevice?.destroy();
+    if (error instanceof Aborted) return { ok: false, error: 'aborted' };
+    if (error instanceof LightmapTooSmall) return { ok: false, error: 'lightmapTooSmall' };
+    if (error instanceof DeviceLostError) return { ok: false, error: 'deviceLost' };
+    throw error;
+  }
+}
+
+async function bakeGBufferBody(
+  scene: BakeScene,
+  options: BakeGBufferOptions,
+  ctx: BakeContext,
 ): Promise<BakeGBufferResult> {
   const bias = options.bias ?? 0.01;
   const supersampling = options.supersampling ?? 1;
@@ -185,22 +226,22 @@ export async function bakeGBuffer(
   /* STEP 1: material images + atlas layout */
 
   const meshes = scene.resolveMeshes();
-  let images: MeshAtlasImages[] = [];
-  {
-    const renderMaterial = await loadMaterialRenderer();
-    images = meshes.map((mesh) => {
-      if (mesh.albedoOnUv2 !== undefined && mesh.emissionOnUv2 !== undefined) {
-        return { albedo: mesh.albedoOnUv2, emission: mesh.emissionOnUv2 };
-      }
-      // bake_render_uv2 replacement (@lightmapper/gbuffer).
-      const size = lightmapImageSize(mesh.lightmapSizeHint, supersampling);
-      return renderMaterial(
-        { positions: mesh.positions, uv2: mesh.uv2!, triangleCount: mesh.triangleCount },
-        mesh.material,
-        size,
-      );
-    });
-  }
+  const renderMaterial = await loadMaterialRenderer();
+  const images: MeshAtlasImages[] = meshes.map((mesh) => {
+    if (mesh.albedoOnUv2 !== undefined && mesh.emissionOnUv2 !== undefined) {
+      return { albedo: mesh.albedoOnUv2, emission: mesh.emissionOnUv2 };
+    }
+    // bake_render_uv2 replacement (@lightmapper/gbuffer).
+    const size = lightmapImageSize(mesh.lightmapSizeHint, supersampling);
+    if (size.width === 0 || size.height === 0) {
+      throw new LightmapTooSmall(); // Godot: BAKE_ERROR_LIGHTMAP_TOO_SMALL
+    }
+    return renderMaterial(
+      { positions: mesh.positions, uv2: mesh.uv2!, triangleCount: mesh.triangleCount },
+      mesh.material,
+      size,
+    );
+  });
 
   // Godot passes the raw denoiser_range to the atlas sizing regardless of
   // whether the denoiser is on (padding always reserves it).
@@ -214,6 +255,7 @@ export async function bakeGBuffer(
     return { ok: false, error: deviceRequest.error };
   }
   const device = deviceRequest.device;
+  ctx.ownedDevice = deviceRequest.owned ? device : null;
 
   step(0.1, 'Determining optimal atlas size');
   const layout: AtlasLayoutResult = blitMeshesIntoAtlas(
@@ -226,8 +268,7 @@ export async function bakeGBuffer(
     },
   );
   if (!layout.ok) {
-    if (deviceRequest.owned) device.destroy();
-    return { ok: false, error: layout.error };
+    return { ok: false, error: layout.error }; // the wrapper frees the device
   }
 
   step(0.2, 'Blitting albedo and emission');
@@ -253,13 +294,15 @@ export async function bakeGBuffer(
     cullMode: cullModeValue(mesh.cullMode),
   }));
 
-  let accel: AccelStructures;
+  // Godot reports one step per mesh while plotting (0.3 … 0.4).
+  for (let i = 0; i < accelMeshes.length; i++) {
+    const p = ((i + 1) / Math.max(1, accelMeshes.length)) * 0.1;
+    step(0.3 + p, `Plotting mesh into acceleration structure ${i + 1}/${accelMeshes.length}`);
+  }
+
   const worker = new AccelWorkerHost();
+  let accel: AccelStructures;
   try {
-    for (let i = 0; i < accelMeshes.length; i++) {
-      const p = ((i + 1) / Math.max(1, accelMeshes.length)) * 0.1;
-      step(0.3 + p, `Plotting mesh into acceleration structure ${i + 1}/${accelMeshes.length}`);
-    }
     accel = await worker.build({
       meshes: accelMeshes,
       atlasSize: layout.atlasSize,
@@ -267,10 +310,6 @@ export async function bakeGBuffer(
       probePositions: probePositions,
       gridSize: GRID_SIZE,
     });
-  } catch (error) {
-    if (deviceRequest.owned) device.destroy();
-    if (error instanceof Aborted) return { ok: false, error: 'aborted' };
-    throw error;
   } finally {
     worker.dispose();
   }
@@ -310,32 +349,27 @@ export async function bakeGBuffer(
   step(0.47, 'Preparing shaders');
   step(0.49, 'Un-occluding geometry');
 
-  let outputs: GBufferStageOutputs;
-  const deviceLost = raceDeviceLost(device);
-  try {
-    outputs = await Promise.race([
-      runGBufferStage(device, {
-        accel,
-        clusterData,
-        lightsBytes,
-        probesBytes,
-        bakeParameters,
-        atlasSize: [layout.atlasSize[0], layout.atlasSize[1]],
-        atlasSlices: layout.atlasSlices,
-        albedoSlices: slices.albedo,
-        emissionSlices: slices.emission,
-        denoiserRange: denoise !== null ? denoise.range : 1,
-      }),
-      deviceLost.then((info) => {
-        throw new DeviceLostError(info);
-      }),
-    ]);
-  } catch (error) {
-    if (deviceRequest.owned) device.destroy();
-    if (error instanceof Aborted) return { ok: false, error: 'aborted' };
-    if (error instanceof DeviceLostError) return { ok: false, error: 'deviceLost' };
-    throw error;
-  }
+  const deviceLost = raceDeviceLost(device).then((info) => {
+    throw new DeviceLostError(info);
+  });
+  // The loser of the race must not surface later as an unhandled rejection
+  // (the device may be lost long after a successful bake).
+  deviceLost.catch(() => undefined);
+  const outputs: GBufferStageOutputs = await Promise.race([
+    runGBufferStage(device, {
+      accel,
+      clusterData,
+      lightsBytes,
+      probesBytes,
+      bakeParameters,
+      atlasSize: [layout.atlasSize[0], layout.atlasSize[1]],
+      atlasSlices: layout.atlasSlices,
+      albedoSlices: slices.albedo,
+      emissionSlices: slices.emission,
+      denoiserRange: denoise !== null ? denoise.range : 1,
+    }),
+    deviceLost,
+  ]);
 
   const meshRects: MeshRect[] = meshes.map((mesh, i) => ({
     slice: layout.slots[i].slice,
@@ -349,6 +383,9 @@ export async function bakeGBuffer(
     ],
   }));
 
+  // From here the result owns the device (its destroy() frees everything).
+  const ownedDevice = ctx.ownedDevice;
+  ctx.ownedDevice = null;
   return {
     ok: true,
     atlasSize: [layout.atlasSize[0], layout.atlasSize[1]],
@@ -360,15 +397,9 @@ export async function bakeGBuffer(
     bounds,
     destroy: () => {
       outputs.destroy();
-      if (deviceRequest.owned) device.destroy();
+      ownedDevice?.destroy();
     },
   };
-}
-
-class DeviceLostError extends Error {
-  constructor(info: GPUDeviceLostInfo) {
-    super(`device lost: ${info.reason ?? 'unknown'} ${info.message}`);
-  }
 }
 
 /** MeshInput.cullMode name → GPU value (CullMode enum). */

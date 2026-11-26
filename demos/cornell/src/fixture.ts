@@ -15,10 +15,6 @@
 
 import { BakeScene } from '@lightmapper/core';
 
-export interface FixtureOptions {
-  atlasMaxSize?: number;
-}
-
 type Vec3 = [number, number, number];
 type Quad = readonly [Vec3, Vec3, Vec3, Vec3]; // p00, p10, p11, p01 (u right, v up)
 

@@ -146,6 +146,10 @@ fn vertex_main_impl(vertex_index: u32, expand_edges: bool) -> VsOut {
     clip_uv = expand_edge_vertex(uv_interp * texel_scale, centroid) / texel_scale;
   }
 
+  // GODOT-QUIRK: `uv_offset` is the driver's half-pixel shift (-0.5/atlas),
+  // so a texel samples uv = (n + 1)/N — edges never land on pixel centers
+  // (godotengine/godot#69126).
+  //
   // PORT: Vulkan's clip-space Y points DOWN (framebuffer row 0 is clip
   // y = -1), WebGPU's points UP. Flip Y so atlas texel row 0 stays uv v = 0
   // exactly like upstream — the CPU-side atlas blits, `meshRects` and every

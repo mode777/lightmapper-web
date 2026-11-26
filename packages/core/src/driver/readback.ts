@@ -2,10 +2,12 @@
  * Texture readback — the port of Godot's `rd->texture_get_data(tex, slice)`
  * usage in the bake flow (and the `DEBUG_TEXTURES` dumps).
  *
- * Provenance (semantics): Godot copies each slice out of the texture array;
- * WebGPU requires a staging buffer with `bytesPerRow` aligned to 256
- * (docs/PORTING_PLAYBOOK.md §5.4), per-slice `copyTextureToBuffer`, then
- * `mapAsync` after submission.
+ * Provenance (semantics): godot/modules/lightmapper_rd/lightmapper_rd.cpp @
+ * 67421f36e5069e62573c44beb8dd2f8f91e065b0. Godot copies each slice out of
+ * the texture array; WebGPU requires a staging buffer with `bytesPerRow`
+ * aligned to 256 (docs/PORTING_PLAYBOOK.md §5.4), per-slice
+ * `copyTextureToBuffer`, then `mapAsync` after submission.
+ * License: MIT (Godot Engine contributors; see NOTICE.md)
  *
  * Not a line-by-line port: the mechanics are WebGPU-specific.
  */
@@ -111,17 +113,4 @@ export async function readbackSlice(
   staging.destroy();
 
   return { width, height, data } as ReadbackImage32F | ReadbackImage16F | ReadbackImage8;
-}
-
-/** Read every layer of a 2D-array texture. */
-export async function readbackAllSlices(
-  device: GPUDevice,
-  texture: GPUTexture,
-  format: ReadbackFormat,
-): Promise<Array<ReadbackImage32F | ReadbackImage16F | ReadbackImage8>> {
-  const out: Array<ReadbackImage32F | ReadbackImage16F | ReadbackImage8> = [];
-  for (let layer = 0; layer < texture.depthOrArrayLayers; layer++) {
-    out.push(await readbackSlice(device, texture, format, layer));
-  }
-  return out;
 }

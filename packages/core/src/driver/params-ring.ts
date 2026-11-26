@@ -3,19 +3,20 @@
  *
  * Provenance (semantics): Godot sets a 32–64 B push constant per compute
  * dispatch / render draw (`compute_list_set_push_constant`,
- * `draw_list_set_push_constant`). WebGPU has no push constants, so group 2
- * binding 0 holds the struct in a uniform buffer bound with **dynamic
- * offsets**; this class hands out 256 B-aligned slots for each write.
+ * `draw_list_set_push_constant`), godot/modules/lightmapper_rd/
+ * lightmapper_rd.cpp @ 67421f36e5069e62573c44beb8dd2f8f91e065b0.
+ * WebGPU has no push constants, so group 2 binding 0 holds the struct in a
+ * uniform buffer bound with **dynamic offsets**; this class hands out
+ * 256 B-aligned slots for each write. License: MIT (see NOTICE.md).
  *
  * Slot size 256 B satisfies `minUniformBufferOffsetAlignment` on every
  * WebGPU implementation (spec floor is 256).
  *
- * Usage contract: write a slot, record the commands that use it, submit,
- * then continue. Godot writes one push constant per dispatch inside the
- * command list; `queue.writeBuffer` happens at *encode* time here, so a
- * slot's bytes are stable for everything recorded before the next wrap of
- * the ring. Drivers must `await onSubmittedWorkDone()` before wrapping
- * (ARCHITECTURE §5 region chunking does exactly that).
+ * Usage contract: `queue.writeBuffer` happens at *encode* time, so a slot's
+ * bytes stay stable only until the ring hands the slot out again. Write the
+ * slots you need (size the ring for them), submit, `await
+ * onSubmittedWorkDone()`, then `markSynced()`. Writing past the capacity
+ * before that throws instead of overwriting params the GPU may still read.
  */
 
 import { BUFFER_USAGE } from './gpu-constants.js';
@@ -28,6 +29,7 @@ export class ParamsRing {
   readonly slotBytes = 256;
   readonly capacity: number;
   private cursor = 0;
+  private inFlight = 0;
 
   constructor(
     private readonly device: GPUDevice,
@@ -43,9 +45,18 @@ export class ParamsRing {
 
   /**
    * Write one params struct (≤ 256 B) and return its **dynamic offset** for
-   * `pass.setBindGroup(2, bindGroup, [offset])`.
+   * `pass.setBindGroup(2, bindGroup, [offset])`. Throws when every slot has
+   * been handed out since the last `markSynced()` — enlarging the ring (or
+   * submitting + awaiting earlier) is the caller's job.
    */
   next(data: ArrayBufferView | ArrayBuffer): number {
+    if (this.inFlight >= this.capacity) {
+      throw new Error(
+        `ParamsRing: ${this.capacity} slots written since the last markSynced() — ` +
+          'the next write would overwrite params the GPU may still be reading. ' +
+          'Size the ring for the dispatches of one submit, or submit + await in between.',
+      );
+    }
     const bytes =
       data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     if (bytes.byteLength > this.slotBytes) {
@@ -53,15 +64,20 @@ export class ParamsRing {
     }
     const slot = this.cursor;
     this.cursor = (this.cursor + 1) % this.capacity;
+    this.inFlight++;
     SCRATCH_BYTES.fill(0, 0, this.slotBytes);
     SCRATCH_BYTES.set(bytes, 0);
     this.device.queue.writeBuffer(this.buffer, slot * this.slotBytes, SCRATCH, 0, this.slotBytes);
     return slot * this.slotBytes;
   }
 
-  /** True when the ring will wrap on the next write (drivers await+sync then). */
-  get willWrap(): boolean {
-    return this.cursor === 0;
+  /**
+   * Acknowledge that the GPU has consumed everything written so far — call
+   * after `await device.queue.onSubmittedWorkDone()`. Makes the whole ring
+   * available again.
+   */
+  markSynced(): void {
+    this.inFlight = 0;
   }
 
   destroy(): void {

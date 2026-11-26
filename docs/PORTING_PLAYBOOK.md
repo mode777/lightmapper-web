@@ -175,6 +175,12 @@ flow stage by stage. When wiring a new kernel:
    replicate exactly (`depthClearValue: 1.0`).
 2. **Params ring buffer**: 256 B-aligned slots (min uniform offset alignment);
    write with `queue.writeBuffer` at `slot * 256`; bind with dynamic offset.
+   Writes happen at *encode* time, so a slot is only stable until the ring
+   hands it out again: size the ring for every write of one submit (the
+   G-buffer stage uses two per slice) and call `markSynced()` after
+   `await onSubmittedWorkDone()`. `ParamsRing.next()` throws instead of
+   wrapping — the original default silently corrupted bakes above 128
+   atlas slices.
 3. **Dispatch ordering**: WebGPU executes dispatches in order within a pass —
    probe/accum read-modify-write across dispatches is safe. Textures used as
    read_write in the *same* pass are fine; do not alias dest/source.

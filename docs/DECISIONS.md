@@ -50,7 +50,10 @@ new ADR that references the old one — never edit history.
   slot 1. (2) The dynamic-offset binding must declare an explicit `size`
   (one ring slot) — with the default whole-buffer range every non-zero
   offset is a validation error, and validation errors are silent no-ops
-  (see the playbook §5.10).
+  (see the playbook §5.10). (3) The ring is sized for the writes of one
+  submit and `markSynced()` is awaited afterwards — `next()` throws rather
+  than overwrite a slot the GPU may still read (the 256-slot default would
+  silently corrupt bakes above 128 atlas slices).
 
 ## ADR-0004: Split the G-buffer raster pass
 
