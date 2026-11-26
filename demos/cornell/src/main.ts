@@ -10,6 +10,7 @@
 import {
   bakeGBuffer,
   drawRgba8ToCanvas,
+  f16ToF32,
   normalToPreview,
   positionToPreview,
   unoccludeToPreview,
@@ -17,9 +18,30 @@ import {
 } from '@lightmapper/core';
 import { fixtureScene } from './fixture.js';
 
+/** Debug hook for tools/verify-demo-remote.py (analytic self-checks). */
+(window as unknown as { __lightmapperDebug: unknown }).__lightmapperDebug = { f16ToF32 };
+
 function setText(id: string, html: string): void {
   const el = document.getElementById(id);
   if (el) el.innerHTML = html;
+}
+
+/** Fraction of texels with position alpha ≥ 0.5 (raster coverage). */
+function coverage(position: Float32Array): number {
+  let covered = 0;
+  for (let i = 3; i < position.length; i += 4) {
+    if (position[i] >= 0.5) covered++;
+  }
+  return position.length > 0 ? covered / (position.length / 4) : 0;
+}
+
+/** Fraction of texels where the unocclude kernel pushed (mask = 1). */
+function unoccludedMask(unocclude: Float32Array): number {
+  let masked = 0;
+  for (let i = 0; i < unocclude.length; i += 4) {
+    if (unocclude[i] > 0.5) masked++;
+  }
+  return unocclude.length > 0 ? masked / (unocclude.length / 4) : 0;
 }
 
 function fmtBytes(n: number): string {
@@ -180,6 +202,9 @@ async function runM2Stage(): Promise<void> {
     }
 
     const ms = Math.round(performance.now() - t0);
+    // Debug hook for tools/verify-demo-remote.py (analytic self-checks
+    // against the fixture geometry). Harmless otherwise.
+    (window as unknown as { __lightmapperLastGBuffer: BakeGBufferResult }).__lightmapperLastGBuffer = result;
     result.destroy(); // readbacks stay valid; free the GPU side
     status.innerHTML =
       `<span class="status-ok">G-buffer baked in ${ms} ms.</span> ` +
@@ -188,7 +213,11 @@ async function runM2Stage(): Promise<void> {
 
     for (let slice = 0; slice < result.atlasSlices; slice++) {
       const heading = document.createElement('h3');
-      heading.textContent = `Atlas slice ${slice}`;
+      const cov = coverage(result.position[slice].data);
+      const mask = unoccludedMask(result.unocclude[slice].data);
+      heading.textContent =
+        `Atlas slice ${slice} — coverage ${(cov * 100).toFixed(1)}%, ` +
+        `unoccluded ${(mask * 100).toFixed(1)}%`;
       output.append(heading);
       const row = document.createElement('div');
       row.className = 'slice-row';
