@@ -6,9 +6,11 @@
  * Not a port: deterministic test geometry. A Cornell-style room (red/green
  * side walls), two boxes, and an emissive ceiling panel; one omni light +
  * one faint directional. UV2 is explicit (per-face charts); normals are
- * omitted so the flat-face path computes them (room quads are wound with
- * normals pointing *into* the room, boxes outward — Godot's raster draws
- * both sides unculled, so winding only picks the flat-normal direction).
+ * omitted so the flat-face path computes them in Godot's clockwise-front
+ * convention (room quads face *into* the room, boxes outward). The
+ * lightmapper rasterizes unculled, but the winding still decides
+ * `face_normal` — the un-occlusion tangent frame and bias direction — so it
+ * has to agree with the vertex normals.
  */
 
 import { BakeScene } from '@lightmapper/core';
@@ -20,7 +22,16 @@ export interface FixtureOptions {
 type Vec3 = [number, number, number];
 type Quad = readonly [Vec3, Vec3, Vec3, Vec3]; // p00, p10, p11, p01 (u right, v up)
 
-/** Append one quad (two triangles) with UVs mapped onto a chart rect. */
+/**
+ * Append one quad (two triangles) with UVs mapped onto a chart rect.
+ *
+ * `p00, p10, p11, p01` is the chart order (u right, v up). Seen from the
+ * side where that order reads naturally the loop is counter-clockwise, so
+ * the right-hand-rule normal of (p00, p10, p11) points AT that viewer.
+ * Godot's front faces are clockwise, so each triangle is emitted reversed:
+ * the clockwise-front normal (what `face_normal` in lm_raster.wgsl and
+ * `flatFaceNormal` compute) then points at that same viewer.
+ */
 function pushQuad(
   mesh: { positions: number[]; uv2: number[] },
   q: Quad,
@@ -33,19 +44,28 @@ function pushQuad(
     [chart.u1, chart.v1],
     [chart.u0, chart.v1],
   ];
-  const tris: Array<[Vec3, [number, number]][]> = [
-    [[p00, uvs[0]], [p10, uvs[1]], [p11, uvs[2]]],
-    [[p00, uvs[0]], [p11, uvs[2]], [p01, uvs[3]]],
+  // Reversed triangle order → clockwise front faces (Godot convention).
+  const tris: Array<Array<number>> = [
+    [0, 2, 1],
+    [0, 3, 2],
   ];
   for (const tri of tris) {
-    for (const [p, uv] of tri) {
+    for (const k of tri) {
+      const p = q[k];
+      const uv = uvs[k];
       mesh.positions.push(p[0], p[1], p[2]);
       mesh.uv2.push(uv[0], uv[1]);
     }
   }
 }
 
-const FULL_CHART = { u0: 0.01, u1: 0.99, v0: 0.01, v1: 0.99 };
+// Wall charts span 2 % .. 98 % of the lightmap. With 256-texel walls that
+// puts every chart edge at a fractional texel offset of 0.12/0.88, so the
+// first ring of texels outside each edge sits 0.12 texels out (reachable
+// only by the edge-expanded draw, never by the fill pass) and the second
+// ring 1.12 texels out (beyond any expansion) — deterministic for
+// tools/verify-demo-remote.py.
+const FULL_CHART = { u0: 0.02, u1: 0.98, v0: 0.02, v1: 0.98 };
 
 /** The 6 outward faces of a box, each mapped to one chart of a 3×2 grid. */
 function boxMesh(center: Vec3, hx: number, hy: number, hz: number, inset = 0.02): {
@@ -142,8 +162,9 @@ export function fixtureScene(): BakeScene {
   const red = { baseColor: [0.66, 0.09, 0.05] as [number, number, number] };
   const green = { baseColor: [0.12, 0.45, 0.09] as [number, number, number] };
 
-  // Walls — flat normals point into the room (winding chosen so
-  // cross(p10−p00, p01−p00) is the inward normal; verified per wall).
+  // Walls — each chart loop reads counter-clockwise from inside the room,
+  // so the emitted clockwise-front normal points inward (see pushQuad).
+  // The u/v axes listed per wall are the chart's (u = p00→p10, v = p00→p01).
   const wallOpts = { lightmapSizeHint: [256, 256] as [number, number], material: white };
   // floor (−y face): inward +y — u = +x, v = −z
   scene.addMesh({ ...wallOpts, ...wallMesh([

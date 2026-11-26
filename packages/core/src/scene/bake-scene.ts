@@ -288,24 +288,41 @@ export class BakeScene {
   }
 }
 
-/** Normalized cross(v1 - v0, v2 - v0) in binary32; zero vector for degenerate triangles. */
+/**
+ * Flat face normal for a triangle, in Godot's winding convention.
+ *
+ * Godot's front faces are CLOCKWISE (`RD::PipelineRasterizationState`
+ * defaults to `POLYGON_FRONT_FACE_CLOCKWISE`), so the geometric front
+ * normal is `-(v1 - v0) × (v2 - v0)`. This is byte-for-byte the expression
+ * the lightmapper kernels use — `face_normal` in lm_raster.glsl and
+ * `normal` in lm_compute.glsl's `trace_ray`:
+ *   `-normalize(cross(v0 - v1, v0 - v2))`
+ * — and the same as `SurfaceTool::generate_normals()`
+ * (`Plane(v0, v1, v2, CLOCKWISE)`). The convenience must agree with the
+ * kernels: they derive front/back and the bias direction from the winding,
+ * so normals computed the other way round would light the back of every
+ * normals-less mesh. Degenerate triangles yield the zero vector.
+ */
 function flatFaceNormal(
   x0: number, y0: number, z0: number,
   x1: number, y1: number, z1: number,
   x2: number, y2: number, z2: number,
 ): Vec3 {
-  const ux = fr(x1 - x0);
-  const uy = fr(y1 - y0);
-  const uz = fr(z1 - z0);
-  const vx = fr(x2 - x0);
-  const vy = fr(y2 - y0);
-  const vz = fr(z2 - z0);
-  const nx = fr(fr(uy * vz) - fr(uz * vy));
-  const ny = fr(fr(uz * vx) - fr(ux * vz));
-  const nz = fr(fr(ux * vy) - fr(uy * vx));
-  const len = fr(Math.sqrt(fr(fr(nx * nx) + fr(ny * ny)) + fr(nz * nz)));
+  // cross(v0 - v1, v0 - v2), negated — same operand order as the GLSL so
+  // the arithmetic follows the kernels' face_normal (GPU normalize() may
+  // still differ in the last ulp; the SIGN convention is what matters here).
+  const ax = fr(x0 - x1);
+  const ay = fr(y0 - y1);
+  const az = fr(z0 - z1);
+  const bx = fr(x0 - x2);
+  const by = fr(y0 - y2);
+  const bz = fr(z0 - z2);
+  const cx = fr(fr(ay * bz) - fr(az * by));
+  const cy = fr(fr(az * bx) - fr(ax * bz));
+  const cz = fr(fr(ax * by) - fr(ay * bx));
+  const len = fr(Math.sqrt(fr(fr(cx * cx) + fr(cy * cy)) + fr(cz * cz)));
   if (len === 0) {
     return [0, 0, 0];
   }
-  return [fr(nx / len), fr(ny / len), fr(nz / len)];
+  return [fr(-cx / len), fr(-cy / len), fr(-cz / len)];
 }

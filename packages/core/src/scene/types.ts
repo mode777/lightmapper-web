@@ -75,13 +75,22 @@ export interface GltfLikeMaterial {
  * corner); `indices` is our convenience — expanded to soup when the scene
  * is resolved. `normals` may be omitted, in which case flat face normals
  * are computed (PORT: Godot always receives normals from the mesh surface).
+ *
+ * **Winding (Godot convention):** a triangle's front face is the side its
+ * vertices appear *clockwise* from (`PolygonFrontFace`), so its geometric
+ * front normal is `-(v1 - v0) × (v2 - v0)`. This is not cosmetic — the
+ * lightmapper kernels derive `face_normal` (bias direction, tangent frame)
+ * and front/back hits (`trace_ray`, `cullMode`) from the winding. Supply
+ * vertex normals pointing to the lit side and wind triangles clockwise
+ * seen from that side. glTF and most WebGPU data are counter-clockwise
+ * front: reverse each triangle's index order first.
  */
 export interface MeshInput {
   /** xyz per vertex, triangle soup or indexed by `indices`. */
   positions: Float32Array;
-  /** xyz per vertex; computed flat if omitted. */
+  /** xyz per vertex; flat face normals in the winding convention above if omitted. */
   normals?: Float32Array;
-  /** Triangle-list indices into the vertex arrays; sequential if omitted. */
+  /** Triangle-list indices into the vertex arrays; sequential if omitted. Clockwise = front face. */
   indices?: Uint32Array;
   /** xy per vertex, lightmap UVs in 0–1 chart space; unwrapped in M1 if omitted. */
   uv2?: Float32Array;

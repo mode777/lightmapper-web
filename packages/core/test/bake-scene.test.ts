@@ -66,14 +66,29 @@ describe('BakeScene.resolveMesh', () => {
     expect(Array.from(mesh.positions.slice(9, 18))).toEqual([0, 1, 0, 1, 0, 0, 1, 1, 0]);
   });
 
-  it('computes flat face normals when omitted (PORT convenience)', () => {
+  it('computes flat face normals in Godot’s clockwise-front convention', () => {
     const mesh = quadIndexed().resolveMesh(0);
-    // Both CCW triangles in the xy plane face +z. Note: the second
-    // triangle's normal.x is -0 (IEEE: -1 * 0) — exactly what the C++
-    // float math produces; the vertex hash normalizes -0 to +0 bits.
-    expect(Array.from(mesh.normals.slice(0, 3))).toEqual([0, 0, 1]);
-    expect(mesh.normals[9]).toBeCloseTo(0);
-    expect(mesh.normals[10]).toBeCloseTo(0);
+    // The quad is counter-clockwise seen from +z (OpenGL/WebGPU front), so
+    // in Godot’s convention its FRONT face points -z: the kernels derive
+    // `face_normal` from the winding (lm_raster.glsl /
+    // SurfaceTool::generate_normals()), and the convenience must agree with
+    // them. normal.x/y are -0 here (IEEE negation of the +0 cross terms).
+    expect(mesh.normals[0]).toBeCloseTo(0, 20);
+    expect(mesh.normals[1]).toBeCloseTo(0, 20);
+    expect(mesh.normals[2]).toBe(-1);
+    expect(mesh.normals[9]).toBeCloseTo(0, 20);
+    expect(mesh.normals[10]).toBeCloseTo(0, 20);
+    expect(mesh.normals[11]).toBe(-1);
+  });
+
+  it('flips flat normals when the winding is reversed (clockwise-front = +z)', () => {
+    // Same quad, index order swapped per triangle → clockwise from +z.
+    const scene = new BakeScene().addMesh({
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]),
+      indices: new Uint32Array([0, 2, 1, 1, 2, 3]),
+    });
+    const mesh = scene.resolveMesh(0);
+    expect(mesh.normals[2]).toBe(1);
     expect(mesh.normals[11]).toBe(1);
   });
 
