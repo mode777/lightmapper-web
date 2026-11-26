@@ -50,4 +50,29 @@ describe('sortArray (Godot introsort port)', () => {
     sortArrayRange(arr, 3, 3, (a, b) => a < b); // sort [3,1,2] -> [1,2,3]
     expect(arr).toEqual([9, 8, 7, 1, 2, 3, 6, 5]);
   });
+
+  // Regression (found by the M2 e2e run on the 128³ fixture): structured
+  // inputs with heavy key duplication exhaust introsort's depth limit and
+  // fall into the partial_sort/heap path, where C++ integer division had
+  // been ported as JS float division (fractional indices → undefined).
+  it('heap path: structured inputs with heavy duplication stay defined and sorted', () => {
+    const patterns: Array<{ name: string; make: (len: number) => number[] }> = [
+      { name: 'duplicates', make: (len) => Array.from({ length: len }, (_, i) => i % 7) },
+      { name: 'sawtooth', make: (len) => Array.from({ length: len }, (_, i) => i % 512) },
+      { name: 'organ-pipe', make: (len) => Array.from({ length: len }, (_, i) => Math.min(i, len - 1 - i)) },
+      { name: 'nearly-sorted', make: (len) => Array.from({ length: len }, (_, i) => (i % 64 === 0 ? i + 1 : i)) },
+      {
+        name: 'grid-plot-like',
+        make: (len) => Array.from({ length: len }, (_, i) => ((i / 16) | 0) * 131071 + ((i % 16) * 7919) % 509),
+      },
+    ];
+    for (const pattern of patterns) {
+      for (const len of [500, 5000, 20000]) {
+        const arr = pattern.make(len);
+        const sorted = [...arr].sort((a, b) => a - b);
+        expect(() => sortArray(arr, (a, b) => a < b), `${pattern.name}/${len}`).not.toThrow();
+        expect(arr, `${pattern.name}/${len}`).toEqual(sorted);
+      }
+    }
+  });
 });

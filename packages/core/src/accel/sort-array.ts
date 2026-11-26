@@ -54,11 +54,13 @@ function medianOf3Index<T>(p: T[], a: number, b: number, c: number, less: (x: T,
 
 /** `SortArray::push_heap`. */
 function pushHeap<T>(first: number, holeIndex: number, topIndex: number, value: T, array: T[], less: (x: T, y: T) => boolean): void {
-  let parent = (holeIndex - 1) / 2;
+  // C++ integer division (ptrdiff_t) — JS `/` is float; truncate or the
+  // array index becomes fractional (reads `undefined`).
+  let parent = Math.trunc((holeIndex - 1) / 2);
   while (holeIndex > topIndex && less(array[first + parent], value)) {
     array[first + holeIndex] = array[first + parent];
     holeIndex = parent;
-    parent = (holeIndex - 1) / 2;
+    parent = Math.trunc((holeIndex - 1) / 2);
   }
   array[first + holeIndex] = value;
 }
@@ -108,7 +110,8 @@ function makeHeap<T>(first: number, last: number, array: T[], less: (x: T, y: T)
     return;
   }
   const len = last - first;
-  let parent = (len - 2) / 2;
+  // C++ integer division — see pushHeap for the truncation note.
+  let parent = Math.trunc((len - 2) / 2);
 
   for (;;) {
     adjustHeap(first, parent, len, array[first + parent], array, less);
