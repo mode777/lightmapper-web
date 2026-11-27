@@ -257,6 +257,15 @@ async function bakeGBufferBody(
   const device = deviceRequest.device;
   ctx.ownedDevice = deviceRequest.owned ? device : null;
 
+  // Typed failure after the device exists. A plain `return` does not pass
+  // through the wrapper's catch, so a device this bake created must be
+  // released here explicitly (a caller's device is never touched).
+  const fail = (error: BakeGBufferError): BakeGBufferResult => {
+    ctx.ownedDevice?.destroy();
+    ctx.ownedDevice = null;
+    return { ok: false, error };
+  };
+
   step(0.1, 'Determining optimal atlas size');
   const layout: AtlasLayoutResult = blitMeshesIntoAtlas(
     images.map((img) => ({ width: img.albedo.width, height: img.albedo.height })),
@@ -268,7 +277,7 @@ async function bakeGBufferBody(
     },
   );
   if (!layout.ok) {
-    return { ok: false, error: layout.error }; // the wrapper frees the device
+    return fail(layout.error);
   }
 
   step(0.2, 'Blitting albedo and emission');

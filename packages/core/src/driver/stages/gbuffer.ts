@@ -79,19 +79,44 @@ export interface GBufferStageOutputs {
   destroy: () => void;
 }
 
-/** Run the M2 G-buffer stages (raster split A/B + edge expansion + unocclude). */
+/**
+ * Run the M2 G-buffer stages (raster split A/B + edge expansion + unocclude).
+ *
+ * WebGPU validation errors do NOT throw — invalid commands become silent
+ * no-ops — so the whole stage runs inside a validation error scope and the
+ * first GPU error rejects. A failed stage frees every resource it created
+ * and balances the error-scope stack: the bake may be running on a
+ * caller-owned device, where nothing else would clean up after it.
+ */
 export async function runGBufferStage(
   device: GPUDevice,
   inputs: GBufferStageInputs,
 ): Promise<GBufferStageOutputs> {
   const registry = new GpuResourceRegistry(device);
+  device.pushErrorScope('validation');
+  try {
+    const outputs = await gbufferStageBody(device, registry, inputs);
+    const validationError = await device.popErrorScope();
+    if (validationError !== null) {
+      throw new Error(`G-buffer stage GPU validation error: ${validationError.message}`);
+    }
+    return outputs;
+  } catch (error) {
+    registry.destroyAll();
+    // The pop above may not have run; an unmatched push would corrupt the
+    // device's error-scope stack (popping an empty stack just rejects).
+    await device.popErrorScope().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function gbufferStageBody(
+  device: GPUDevice,
+  registry: GpuResourceRegistry,
+  inputs: GBufferStageInputs,
+): Promise<GBufferStageOutputs> {
   const [width, height] = inputs.atlasSize;
   const slices = inputs.atlasSlices;
-
-  // WebGPU validation errors do NOT throw — invalid commands become silent
-  // no-ops. Push an error scope around the whole stage so any validation
-  // failure surfaces as a rejected promise instead of an empty bake.
-  device.pushErrorScope('validation');
 
   /* --- textures ------------------------------------------------------ */
 
@@ -235,7 +260,7 @@ export async function runGBufferStage(
   // Two params writes per slice (raster + unocclude), all consumed by the
   // single submit below — the ring must hold all of them (the default 256
   // slots would only cover 128 slices; ParamsRing throws rather than wrap).
-  const ring = new ParamsRing(device, Math.max(256, 2 * slices));
+  const ring = new ParamsRing(device, Math.max(256, 2 * slices), registry);
   const { layout: paramsLayout, bindGroup: paramsBindGroup } = createParamsBindGroup(device, ring);
 
   const rasterModule = device.createShaderModule({ label: 'lm_raster', code: lmRaster });
@@ -455,11 +480,6 @@ export async function runGBufferStage(
   await device.queue.onSubmittedWorkDone();
   ring.markSynced();
 
-  const validationError = await device.popErrorScope();
-  if (validationError !== null) {
-    throw new Error(`G-buffer stage GPU validation error: ${validationError.message}`);
-  }
-
   // The raster-stage sources are dead once unocclude has run — free them
   // now (ARCHITECTURE §5: destroy targets at their last consumer).
   registry.destroyTexture(positionTex);
@@ -483,8 +503,7 @@ export async function runGBufferStage(
     // Canonical post-unocclude textures for later stages (M3 samples these).
     textures: { position: positionOutTex, normal: normalTex, unocclude: unoccludeOutTex },
     destroy: () => {
-      ring.destroy();
-      registry.destroyAll();
+      registry.destroyAll(); // includes the params ring
     },
   };
 }

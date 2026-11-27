@@ -147,6 +147,16 @@ describe('ParamsRing (ADR-0003)', () => {
     expect(() => ring.next(new ArrayBuffer(257))).toThrow(/must fit/);
   });
 
+  it('created through a registry, the ring is freed with the stage (failed stages leak nothing)', () => {
+    const { device, buffers } = fakeDevice();
+    const registry = new GpuResourceRegistry(device);
+    new ParamsRing(device, 4, registry);
+    expect(registry.size).toBe(1);
+    expect(buffers).toHaveLength(1);
+    registry.destroyAll();
+    expect(buffers[0]!.destroyed).toBe(1);
+  });
+
   it('zero-fills the tail of a slot (params structs are shorter than 256 B)', () => {
     const { device } = fakeDevice();
     const ring = new ParamsRing(device, 1);
@@ -243,31 +253,49 @@ describe('bakeGBuffer — typed failures and cancellation', () => {
     });
   });
 
-  it('frees a device it created when the bake is cancelled', async () => {
+  // Node ≥ 21 has a `navigator` object without WebGPU: stub navigator.gpu so
+  // the bake "creates" a device it owns, and watch when it destroys it.
+  function withOwnedDevice(run: (owned: { destroyed: number }) => Promise<void>): Promise<void> {
     const nav = globalThis.navigator as unknown as { gpu?: unknown };
-    if (nav === undefined || navigator.gpu !== undefined) return; // Node ≥ 21 only
-    let destroyed = 0;
-    const owned = {
-      destroy: () => void destroyed++,
+    if (nav === undefined || navigator.gpu !== undefined) {
+      return Promise.resolve(); // nothing to stub
+    }
+    const owned = { destroyed: 0 };
+    const device = {
+      destroy: () => void owned.destroyed++,
       limits: { maxTextureDimension2D: 8192 },
       lost: new Promise<never>(() => undefined),
     };
     Object.defineProperty(navigator, 'gpu', {
       configurable: true,
       value: {
-        requestAdapter: async () => ({ requestDevice: async () => owned, info: {}, features: new Set() }),
+        requestAdapter: async () => ({ requestDevice: async () => device, info: {}, features: new Set() }),
       },
     });
-    try {
+    return run(owned).finally(() => {
+      Object.defineProperty(navigator, 'gpu', { configurable: true, value: undefined });
+    });
+  }
+
+  it('frees a device it created when the bake is cancelled', async () => {
+    await withOwnedDevice(async (owned) => {
       for (const abortAt of [1, 2]) {
-        destroyed = 0;
+        owned.destroyed = 0;
         let calls = 0;
         const result = await bakeGBuffer(quadScene(), { onProgress: () => ++calls <= abortAt });
         expect(result).toEqual({ ok: false, error: 'aborted' });
-        expect(destroyed, `device freed when aborting at step ${abortAt}`).toBe(1);
+        expect(owned.destroyed, `device freed when aborting at step ${abortAt}`).toBe(1);
       }
-    } finally {
-      Object.defineProperty(navigator, 'gpu', { configurable: true, value: undefined });
-    }
+    });
+  });
+
+  it('frees a device it created on a typed failure (atlas does not fit)', async () => {
+    await withOwnedDevice(async (owned) => {
+      // A 128² lightmap needs a 256² atlas (padding + power-of-two), which
+      // exceeds atlasMaxSize 64 — a plain `return` path, not an exception.
+      const result = await bakeGBuffer(quadScene({ lightmapSizeHint: [128, 128] }), { atlasMaxSize: 64 });
+      expect(result).toEqual({ ok: false, error: 'textureExceedsMaxSize' });
+      expect(owned.destroyed).toBe(1);
+    });
   });
 });

@@ -20,6 +20,7 @@
  */
 
 import { BUFFER_USAGE } from './gpu-constants.js';
+import type { GpuResourceRegistry } from './registry.js';
 
 const SCRATCH = new ArrayBuffer(256);
 const SCRATCH_BYTES = new Uint8Array(SCRATCH);
@@ -34,13 +35,17 @@ export class ParamsRing {
   constructor(
     private readonly device: GPUDevice,
     capacity = 256,
+    registry?: GpuResourceRegistry,
   ) {
     this.capacity = capacity;
-    this.buffer = device.createBuffer({
+    const descriptor: GPUBufferDescriptor = {
       label: 'lightmapper-params-ring',
       size: capacity * this.slotBytes,
       usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST,
-    });
+    };
+    // Created through the registry when given, so a failed stage frees the
+    // ring together with everything else it created.
+    this.buffer = registry !== undefined ? registry.buffer(descriptor) : device.createBuffer(descriptor);
   }
 
   /**

@@ -117,6 +117,10 @@ Stage-by-stage mapping from Godot's `lightmapper_rd.cpp` to this repo:
   `false` cancels at the next region boundary (mirrors Godot's `BakeStepFunc`).
 - GPU device loss surfaces as a `BakeError.deviceLost` result after the in-flight
   region completes; partial results are not returned.
+- A failed or cancelled stage frees every GPU resource it created — also on a
+  caller-owned device, where nothing else would — and leaves the device's
+  error-scope stack balanced. Cancellation at any step resolves to
+  `{ ok: false, error: 'aborted' }` (never a rejected promise).
 - Capability mismatches (missing WebGPU, atlas > device limits) fail fast with
   typed errors before any GPU allocation.
 
