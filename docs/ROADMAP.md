@@ -71,7 +71,7 @@ Everything here is unit-testable without a GPU.
   vectors. A native `DEBUG_TEXTURES` golden pass stays recommended at the
   M2 boundary per the verification model.
 
-## M2 — G-buffer stage (first GPU) ✅ (done 2026-11-22)
+## M2 — G-buffer stage (first GPU) ✅ (done 2026-11-27)
 
 - [x] Driver skeleton: private `GPUDevice`, resource registry, bind-group
       factory for the canonical map, `Params` ring buffer (ADR-0003)

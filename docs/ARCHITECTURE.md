@@ -1,6 +1,6 @@
 # Architecture
 
-*Last updated: 2026-11-26 (M2 verified on software WebGPU). Keep this document current with reality.*
+*Last updated: 2026-11-27 (M2 verified on software WebGPU). Keep this document current with reality.*
 
 ## 1. Mission & non-goals
 

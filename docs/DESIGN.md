@@ -1,6 +1,6 @@
 # Design
 
-*Last updated: 2026-11-26 (M2). This document is the **authoritative**
+*Last updated: 2026-11-27 (M2). This document is the **authoritative**
 specification for the public API, data contracts and WGSL binding map.
 Implementation files (TS + WGSL) must stay in lock-step with it.*
 
