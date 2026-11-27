@@ -12,6 +12,10 @@ bakes. This script catches that class of bug before a human looks at Pages.
 Usage (from the repo root, after `npm run build:demo`):
 
     python3 tools/verify-demo-remote.py [--screenshot out.png]
+    python3 tools/verify-demo-remote.py --url https://mode777.github.io/lightmapper-web/
+
+The second form skips the upload and checks the *deployed* site instead of
+a local build (run it after the Pages deploy goes green).
 
 Environment:
     SSH_HOST, SSH_USER, SSH_PASSWORD   verification box credentials
@@ -264,6 +268,7 @@ POLL = base64.b64decode(sys.argv[3]).decode()
 SCREENSHOT = sys.argv[4]
 SELFCHECK = base64.b64decode(sys.argv[5]).decode()
 DOCROOT = sys.argv[6]
+TARGET = sys.argv[7] if len(sys.argv) > 7 else ""  # deployed URL → no local server
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -351,8 +356,12 @@ def main():
     cdp = free_port()
     profile = "/tmp/lightmapper-verify-profile-%d" % cdp
     subprocess.run(["rm", "-rf", profile], check=False)
-    httpd = serve(DOCROOT)
-    url = "http://127.0.0.1:%d/index.html?autorun" % httpd.server_address[1]
+    if TARGET:
+        httpd = None  # check the deployed site as-is
+        url = TARGET + ("&" if "?" in TARGET else "?") + "autorun"
+    else:
+        httpd = serve(DOCROOT)
+        url = "http://127.0.0.1:%d/index.html?autorun" % httpd.server_address[1]
     chrome = subprocess.Popen(
         [CHROME, "--headless", "--no-sandbox", "--disable-gpu-sandbox",
          "--user-data-dir=" + profile, "--remote-debugging-port=%d" % cdp,
@@ -417,8 +426,9 @@ def main():
             chrome.wait(10)
         except subprocess.TimeoutExpired:
             chrome.kill()
-        httpd.shutdown()
-        httpd.server_close()
+        if httpd is not None:
+            httpd.shutdown()
+            httpd.server_close()
         shutil.rmtree(profile, ignore_errors=True)
 
 
@@ -435,14 +445,15 @@ def rrun(ssh, cmd, timeout=120):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--screenshot", default=None, help="download the page screenshot to this path")
-    parser.add_argument("--port", type=int, default=8791)
+    parser.add_argument("--url", default=None,
+                        help="check the deployed site at this URL instead of a local build")
     args = parser.parse_args()
 
     for var in ("SSH_HOST", "SSH_USER", "SSH_PASSWORD"):
         if var not in os.environ:
             sys.exit(f"{var} is not set — this check needs the verification box (AGENTS.md).")
     dist = os.path.join("demos", "cornell", "dist", "index.html")
-    if not os.path.isfile(dist):
+    if args.url is None and not os.path.isfile(dist):
         sys.exit("demos/cornell/dist is missing — run `npm run build:demo` first.")
 
     ssh = paramiko.SSHClient()
@@ -455,19 +466,22 @@ def main():
     try:
         home, _ = rrun(ssh, "echo $HOME")
         remote_dir = posixpath.join(home.strip(), "lightmapper-verify")
-        rrun(ssh, f"rm -rf {remote_dir} && mkdir -p {remote_dir}/docroot")
-
-        with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
-            tar_path = tmp.name
-        with tarfile.open(tar_path, "w:gz") as tar:
-            tar.add(os.path.dirname(dist), arcname=".")
+        rrun(ssh, f"mkdir -p {remote_dir}")
+        if args.url is None:
+            rrun(ssh, f"rm -rf {remote_dir}/docroot && mkdir -p {remote_dir}/docroot")
+            with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
+                tar_path = tmp.name
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(os.path.dirname(dist), arcname=".")
+            sftp = ssh.open_sftp()
+            sftp.put(tar_path, posixpath.join(remote_dir, "demo.tgz"))
+            os.unlink(tar_path)
+            sftp.close()
+            rrun(ssh, f"cd {remote_dir}/docroot && tar xzf ../demo.tgz")
         sftp = ssh.open_sftp()
-        sftp.put(tar_path, posixpath.join(remote_dir, "demo.tgz"))
-        os.unlink(tar_path)
         with sftp.open(posixpath.join(remote_dir, "drive.py"), "w") as f:
             f.write(REMOTE_DRIVER)
         sftp.close()
-        rrun(ssh, f"cd {remote_dir}/docroot && tar xzf ../demo.tgz")
 
         chrome = os.environ.get("CHROME_SHELL_PATH", DEFAULT_CHROME)
         shot_remote = "/tmp/lightmapper-verify.png" if args.screenshot else ""
@@ -475,12 +489,14 @@ def main():
             ssh,
             # The driver serves the build itself (in-process, ephemeral port)
             # and drives the browser; one bounded process, nothing left behind.
-            "python3 {d}/drive.py '{c}' '{f}' '{b}' '{s}' '{k}' '{d}/docroot'".format(
+            "python3 {d}/drive.py '{c}' '{f}' '{b}' '{s}' '{k}' '{root}' '{u}'".format(
                 d=remote_dir, c=chrome,
                 f=json.dumps(FLAGS).replace("'", "'\\''"),
                 b=base64.b64encode(POLL_JS.encode()).decode(),
                 s=shot_remote,
                 k=base64.b64encode(SELFCHECK_JS.encode()).decode(),
+                root=f"{remote_dir}/docroot",
+                u=args.url.rstrip("/") + "/" if args.url else "",
             ),
             timeout=460,
         )
@@ -498,6 +514,8 @@ def main():
     finally:
         ssh.close()
 
+    if args.url:
+        print(f"deployed site: {args.url}")
     result_line = next((l for l in out.splitlines() if l.startswith("RESULT ")), None)
     if result_line is None:
         sys.exit("FAIL: the page never reported a result")
