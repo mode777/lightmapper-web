@@ -249,6 +249,10 @@ ported `trace_ray`). It only needs `SSH_HOST/SSH_USER/SSH_PASSWORD` from the
 environment. A failing run means a driver bug or a regression in a kernel;
 a passing run says nothing about *lighting* parity — that is what the
 goldens below are for. Extend the self-check when a new stage lands.
+Once the Pages deploy is green, point it at the published build instead —
+`--url https://mode777.github.io/lightmapper-web/` — which is the only
+check that the *deployed* site works (asset URLs, worker, embedded shaders),
+not just the local one.
 
 1. Build a headless Godot (or use a desktop install) at the pinned commit;
    uncomment `#define DEBUG_TEXTURES` in `lightmapper_rd.cpp` — it saves
